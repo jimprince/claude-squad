@@ -51,6 +51,10 @@ type Instance struct {
 	AutoYes bool
 	// Prompt is the initial prompt to pass to the instance on startup
 	Prompt string
+	// IsWorker indicates if this instance is a worker managed by an orchestrator
+	IsWorker bool
+	// ParentOrchestrator is the title of the orchestrator that manages this worker (if IsWorker is true)
+	ParentOrchestrator string
 
 	// DiffStats stores the current git diff statistics
 	diffStats *git.DiffStats
@@ -67,16 +71,18 @@ type Instance struct {
 // ToInstanceData converts an Instance to its serializable form
 func (i *Instance) ToInstanceData() InstanceData {
 	data := InstanceData{
-		Title:     i.Title,
-		Path:      i.Path,
-		Branch:    i.Branch,
-		Status:    i.Status,
-		Height:    i.Height,
-		Width:     i.Width,
-		CreatedAt: i.CreatedAt,
-		UpdatedAt: time.Now(),
-		Program:   i.Program,
-		AutoYes:   i.AutoYes,
+		Title:              i.Title,
+		Path:               i.Path,
+		Branch:             i.Branch,
+		Status:             i.Status,
+		Height:             i.Height,
+		Width:              i.Width,
+		CreatedAt:          i.CreatedAt,
+		UpdatedAt:          time.Now(),
+		Program:            i.Program,
+		AutoYes:            i.AutoYes,
+		IsWorker:           i.IsWorker,
+		ParentOrchestrator: i.ParentOrchestrator,
 	}
 
 	// Only include worktree data if gitWorktree is initialized
@@ -105,15 +111,18 @@ func (i *Instance) ToInstanceData() InstanceData {
 // FromInstanceData creates a new Instance from serialized data
 func FromInstanceData(data InstanceData) (*Instance, error) {
 	instance := &Instance{
-		Title:     data.Title,
-		Path:      data.Path,
-		Branch:    data.Branch,
-		Status:    data.Status,
-		Height:    data.Height,
-		Width:     data.Width,
-		CreatedAt: data.CreatedAt,
-		UpdatedAt: data.UpdatedAt,
-		Program:   data.Program,
+		Title:              data.Title,
+		Path:               data.Path,
+		Branch:             data.Branch,
+		Status:             data.Status,
+		Height:             data.Height,
+		Width:              data.Width,
+		CreatedAt:          data.CreatedAt,
+		UpdatedAt:          data.UpdatedAt,
+		Program:            data.Program,
+		AutoYes:            data.AutoYes,
+		IsWorker:           data.IsWorker,
+		ParentOrchestrator: data.ParentOrchestrator,
 		gitWorktree: git.NewGitWorktreeFromStorage(
 			data.Worktree.RepoPath,
 			data.Worktree.WorktreePath,

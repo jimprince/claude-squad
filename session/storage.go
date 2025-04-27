@@ -19,6 +19,9 @@ type InstanceData struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	AutoYes   bool      `json:"auto_yes"`
 
+	IsWorker           bool   `json:"is_worker"`
+	ParentOrchestrator string `json:"parent_orchestrator"`
+
 	Program   string          `json:"program"`
 	Worktree  GitWorktreeData `json:"worktree"`
 	DiffStats DiffStatsData   `json:"diff_stats"`
