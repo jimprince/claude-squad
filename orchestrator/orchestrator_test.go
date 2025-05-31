@@ -7,13 +7,21 @@ import (
 func TestParsePlanOutput(t *testing.T) {
 	output := `I'll analyze this goal and break it down into tasks.
 
-TASK: task1 | Implement feature 1 with details about what to do
-TASK: task2 | Implement feature 2 with another set of instructions
-TASK: task3 | Implement feature 3 with some more instructions
+<TASK-1>
+task1 | Implement feature 1 with details about what to do
+</TASK-1>
+
+<TASK-2>
+task2 | Implement feature 2 with another set of instructions
+</TASK-2>
+
+<TASK-3>
+task3 | Implement feature 3 with some more instructions
+</TASK-3>
 
 Let me know if you need any adjustments to this plan.`
 
-	tasks := parsePlanOutput(output, "default prompt")
+	tasks := parsePlanOutput(output)
 
 	if len(tasks) != 3 {
 		t.Errorf("Expected 3 tasks, got %d", len(tasks))
@@ -27,7 +35,7 @@ Let me know if you need any adjustments to this plan.`
 	}
 
 	// Test with empty output
-	emptyTasks := parsePlanOutput("", "default prompt")
+	emptyTasks := parsePlanOutput("")
 	if len(emptyTasks) != 0 {
 		t.Errorf("Expected 0 tasks from empty output, got %d", len(emptyTasks))
 	}

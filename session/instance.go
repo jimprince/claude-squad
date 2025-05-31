@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -29,6 +30,10 @@ const (
 
 // Instance is a running instance of claude code.
 type Instance struct {
+	// Subscribers to completion signal
+	completionSubscribers []chan struct{}
+	// Used to guard subscribers
+	completionMu sync.Mutex
 	// Title is the title of the instance.
 	Title string
 	// Path is the path to the workspace.
@@ -155,10 +160,12 @@ type InstanceOptions struct {
 	Title string
 	// Path is the path to the workspace.
 	Path string
-	// Program is the program to run in the instance (e.g. "claude", "aider --model ollama_chat/gemma3:1b")
+	// Program is the program to run in the instance (e.g. "claude", "aider --model ollama_chat/gemma3:1b").
 	Program string
-	// If AutoYes is true, then
+	// AutoYes is true if the instance should automatically press enter when prompted.
 	AutoYes bool
+	// IsWorker is true if the instance is being managed by an orchestrator.
+	IsWorker bool
 }
 
 func NewInstance(opts InstanceOptions) (*Instance, error) {
@@ -201,6 +208,8 @@ func (i *Instance) Start(firstTimeSetup bool) error {
 	}
 
 	tmuxSession := tmux.NewTmuxSession(i.Title, i.Program)
+	tmuxSession.OnUserInput = i.resetCompletionSubscribers
+
 	i.tmuxSession = tmuxSession
 
 	if firstTimeSetup {
@@ -308,7 +317,14 @@ func (i *Instance) Preview() (string, error) {
 	if !i.started || i.Status == Paused {
 		return "", nil
 	}
-	return i.tmuxSession.CapturePaneContent()
+	return i.tmuxSession.CapturePaneContent(false)
+}
+
+func (i *Instance) FullOutput() (string, error) {
+	if !i.started || i.Status == Paused {
+		return "", nil
+	}
+	return i.tmuxSession.CapturePaneContent(true)
 }
 
 func (i *Instance) HasUpdated() (updated bool, hasPrompt bool) {
@@ -506,6 +522,7 @@ func (i *Instance) GetDiffStats() *git.DiffStats {
 
 // SendPrompt sends a prompt to the tmux session
 func (i *Instance) SendPrompt(prompt string) error {
+	i.resetCompletionSubscribers()
 	if !i.started {
 		return fmt.Errorf("instance not started")
 	}
@@ -523,4 +540,56 @@ func (i *Instance) SendPrompt(prompt string) error {
 	}
 
 	return nil
+}
+
+func (i *Instance) WaitForCompletion() error {
+	if !i.started {
+		return fmt.Errorf("instance not started")
+	}
+	if i.tmuxSession == nil {
+		return fmt.Errorf("tmux session not initialized")
+	}
+
+	ch := i.subscribeCompletion()
+
+	select {
+	case <-ch:
+		return nil
+	case <-time.After(30 * time.Minute): // Timeout after 30 minutes
+		return fmt.Errorf("timed out waiting for instance to complete")
+	}
+}
+
+// subscribeCompletion returns a channel that will be closed when the instance completes.
+func (i *Instance) subscribeCompletion() <-chan struct{} {
+	ch := make(chan struct{})
+	i.completionMu.Lock()
+	i.completionSubscribers = append(i.completionSubscribers, ch)
+	i.completionMu.Unlock()
+	return ch
+}
+
+// signalCompletionSubscribers closes all subscriber channels and resets the list.
+func (i *Instance) signalCompletionSubscribers() {
+	i.completionMu.Lock()
+	defer i.completionMu.Unlock()
+	for _, ch := range i.completionSubscribers {
+		close(ch)
+	}
+	i.completionSubscribers = nil
+}
+
+// resetCompletionSubscribers closes all subscriber channels and resets the list.
+func (i *Instance) resetCompletionSubscribers() {
+	i.completionMu.Lock()
+	defer i.completionMu.Unlock()
+	for _, ch := range i.completionSubscribers {
+		select {
+		case <-ch:
+			// already closed
+		default:
+			close(ch)
+		}
+	}
+	i.completionSubscribers = nil
 }
