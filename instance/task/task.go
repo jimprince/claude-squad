@@ -112,6 +112,14 @@ func NewTask(opts TaskOptions) (*Task, error) {
 	}, nil
 }
 
+func (t *Task) RepoName() (string, error) {
+	if t.gitWorktree == nil {
+		return "", fmt.Errorf("git worktree not initialized")
+	}
+
+	return t.gitWorktree.GetRepoName(), nil
+}
+
 func (t *Task) SetStatus(status Status) {
 	t.Status = status
 }

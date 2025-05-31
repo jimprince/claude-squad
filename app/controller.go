@@ -1,7 +1,9 @@
 package app
 
 import (
+	"claude-squad/instance"
 	"claude-squad/instance/orchestrator"
+	"claude-squad/instance/task"
 	"claude-squad/keys"
 	"claude-squad/log"
 	"claude-squad/ui"
@@ -13,11 +15,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
-
-type Agent interface {
-	StatusText() string
-	MenuItems() []keys.KeyName
-}
 
 type orchestratorState int
 
@@ -39,8 +36,8 @@ type controller struct {
 	// orchestratorState is the state of the orchestrator
 	orchestratorState orchestratorState
 
-	// agents is the list of agents being managed
-	agents []Agent
+	// instances is the list of instances being managed
+	instances []instance.Instance
 
 	// UI components
 	list             *ui.List
@@ -64,7 +61,7 @@ func (im *controller) LoadExistingInstances(h *home) error {
 	}
 
 	for _, instance := range instances {
-		finalizer := im.list.AddInstance(instance)
+		finalizer := im.list.AddInstance(instance.(*task.Task))
 		finalizer() // Call finalizer immediately since instance is already started
 	}
 
@@ -138,12 +135,12 @@ func (im *controller) handleMetadataUpdate(h *home) tea.Cmd {
 		}
 		updated, prompt := instance.HasUpdated()
 		if updated {
-			instance.SetStatus(instance.Running)
+			instance.SetStatus(task.Running)
 		} else {
 			if prompt {
 				instance.TapEnter()
 			} else {
-				instance.SetStatus(instance.Ready)
+				instance.SetStatus(task.Ready)
 			}
 		}
 		if err := instance.UpdateDiffStats(); err != nil {
@@ -344,7 +341,7 @@ func (im *controller) handleNewInstanceState(h *home, msg tea.KeyMsg) (tea.Model
 	return h, nil
 }
 
-func (im *controller) finalizeNewInstance(h *home, instance *session.Instance) (tea.Model, tea.Cmd) {
+func (im *controller) finalizeNewInstance(h *home, instance *task.Task) (tea.Model, tea.Cmd) {
 	if len(instance.Title) == 0 {
 		return h, h.handleError(fmt.Errorf("title cannot be empty"))
 	}
@@ -355,7 +352,7 @@ func (im *controller) finalizeNewInstance(h *home, instance *session.Instance) (
 		return h, h.handleError(err)
 	}
 	// Save after adding new instance
-	if err := h.storage.SaveInstances(im.list.GetInstances()); err != nil {
+	if err := h.storage.SaveInstances(im.instances); err != nil {
 		return h, h.handleError(err)
 	}
 	// Instance added successfully, call the finalizer.
@@ -387,7 +384,7 @@ func (im *controller) handleNewInstance(h *home, promptAfter bool) (tea.Model, t
 		return h, h.handleError(
 			fmt.Errorf("you can't create more than %d instances", GlobalInstanceLimit))
 	}
-	instance, err := session.NewInstance(session.InstanceOptions{
+	instance, err := task.NewTask(task.TaskOptions{
 		Title:   "",
 		Path:    ".",
 		Program: h.program,
@@ -534,7 +531,7 @@ func (im *controller) instanceChanged(h *home) tea.Cmd {
 func (im *controller) generateOrchestratorPlan(h *home, prompt string) (tea.Model, tea.Cmd) {
 	return h, func() tea.Msg {
 		orch := orchestrator.NewOrchestrator(h.program, prompt)
-		im.agents = append(im.agents, orch)
+		im.instances = append(im.instances, orch)
 
 		orch.ForumulatePlan()
 
@@ -581,7 +578,7 @@ func (im *controller) handleOrchestratorPlanKeyPress(h *home, msg tea.KeyMsg) (t
 }
 
 func (im *controller) HandleQuit(h *home) (tea.Model, tea.Cmd) {
-	if err := h.storage.SaveInstances(im.list.GetInstances()); err != nil {
+	if err := h.storage.SaveInstances(im.instances); err != nil {
 		return h, h.handleError(err)
 	}
 	return h, tea.Quit

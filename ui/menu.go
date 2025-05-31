@@ -1,10 +1,9 @@
 package ui
 
 import (
+	"claude-squad/instance/task"
 	"claude-squad/keys"
 	"strings"
-
-	"claude-squad/session"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -46,7 +45,7 @@ type Menu struct {
 	options       []keys.KeyName
 	height, width int
 	state         MenuState
-	instance      *session.Instance
+	instance      *task.Task
 	isInDiffTab   bool
 
 	// keyDown is the key which is pressed. The default is -1.
@@ -83,7 +82,7 @@ func (m *Menu) SetState(state MenuState) {
 }
 
 // SetInstance updates the current instance and refreshes menu options
-func (m *Menu) SetInstance(instance *session.Instance) {
+func (m *Menu) SetInstance(instance *task.Task) {
 	m.instance = instance
 	// Only change the state if we're not in a special state (NewInstance or Prompt)
 	if m.state != StateNewInstance && m.state != StatePrompt {
@@ -133,7 +132,7 @@ func (m *Menu) addInstanceOptions() {
 
 	// Action group
 	actionGroup := []keys.KeyName{keys.KeyEnter, keys.KeySubmit}
-	if m.instance.Status == session.Paused {
+	if m.instance.Status == task.Paused {
 		actionGroup = append(actionGroup, keys.KeyResume)
 	} else {
 		actionGroup = append(actionGroup, keys.KeyCheckout)
