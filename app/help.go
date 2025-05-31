@@ -1,8 +1,8 @@
 package app
 
 import (
+	"claude-squad/instance/task"
 	"claude-squad/log"
-	"claude-squad/session"
 	"claude-squad/ui"
 	"claude-squad/ui/overlay"
 	"fmt"
@@ -36,7 +36,7 @@ var (
 	descStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
 )
 
-func (h helpType) ToContent(instance *session.Instance) string {
+func (h helpType) ToContent(task *task.Task) string {
 	switch h {
 	case helpTypeGeneral:
 		content := lipgloss.JoinVertical(lipgloss.Left,
@@ -69,8 +69,8 @@ func (h helpType) ToContent(instance *session.Instance) string {
 			titleStyle.Render("Instance Created"),
 			"",
 			descStyle.Render("New session created:"),
-			descStyle.Render(fmt.Sprintf("• Git branch: %s (isolated worktree)", lipgloss.NewStyle().Bold(true).Render(instance.Branch))),
-			descStyle.Render(fmt.Sprintf("• %s running in background tmux session", lipgloss.NewStyle().Bold(true).Render(instance.Program))),
+			descStyle.Render(fmt.Sprintf("• Git branch: %s (isolated worktree)", lipgloss.NewStyle().Bold(true).Render(task.Branch))),
+			descStyle.Render(fmt.Sprintf("• %s running in background tmux session", lipgloss.NewStyle().Bold(true).Render(task.Program))),
 			"",
 			headerStyle.Render("Managing:"),
 			keyStyle.Render("↵/o")+descStyle.Render("   - Attach to the session to interact with it directly"),
@@ -109,7 +109,7 @@ func (h helpType) ToContent(instance *session.Instance) string {
 }
 
 // showHelpScreen displays the help screen overlay if it hasn't been shown before
-func (m *home) showHelpScreen(helpType helpType, instance *session.Instance, textOverlay *overlay.TextOverlay, onDismiss func()) (tea.Model, tea.Cmd) {
+func (m *home) showHelpScreen(helpType helpType, task *task.Task, textOverlay *overlay.TextOverlay, onDismiss func()) (tea.Model, tea.Cmd) {
 	// Get the flag for this help type
 	var helpFlag uint32
 	switch helpType {
@@ -131,7 +131,7 @@ func (m *home) showHelpScreen(helpType helpType, instance *session.Instance, tex
 			log.WarningLog.Printf("Failed to save help screen state: %v", err)
 		}
 
-		content := helpType.ToContent(instance)
+		content := helpType.ToContent(task)
 
 		textOverlay.Content = content
 		textOverlay.OnDismiss = onDismiss

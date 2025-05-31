@@ -1,10 +1,9 @@
 package app
 
 import (
+	"claude-squad/instance/orchestrator"
 	"claude-squad/keys"
 	"claude-squad/log"
-	"claude-squad/orchestrator"
-	"claude-squad/session"
 	"claude-squad/ui"
 	"claude-squad/ui/overlay"
 	"fmt"
@@ -139,12 +138,12 @@ func (im *controller) handleMetadataUpdate(h *home) tea.Cmd {
 		}
 		updated, prompt := instance.HasUpdated()
 		if updated {
-			instance.SetStatus(session.Running)
+			instance.SetStatus(instance.Running)
 		} else {
 			if prompt {
 				instance.TapEnter()
 			} else {
-				instance.SetStatus(session.Ready)
+				instance.SetStatus(instance.Ready)
 			}
 		}
 		if err := instance.UpdateDiffStats(); err != nil {

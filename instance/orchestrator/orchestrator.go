@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync"
 
+	"claude-squad/instance/task"
 	"claude-squad/keys"
-	"claude-squad/session"
 )
 
 type status int
@@ -36,9 +36,9 @@ type Orchestrator struct {
 	// Path is the path the orchestrator is operating in.
 	Path string
 	// Leader is the instance tied to the orchestrator itself.
-	Leader *session.Instance
+	Leader *task.Task
 	// Workers is a map of managed workers by this orchestrator.
-	Workers   map[string]*session.Instance
+	Workers   map[string]*task.Task
 	Completed map[string]bool
 	Program   string
 
@@ -59,7 +59,7 @@ func NewOrchestrator(program, prompt string) *Orchestrator {
 	return &Orchestrator{
 		Prompt:    prompt,
 		Path:      ".",
-		Workers:   make(map[string]*session.Instance),
+		Workers:   make(map[string]*task.Task),
 		Completed: make(map[string]bool),
 		Program:   program,
 	}
@@ -88,7 +88,7 @@ func (o *Orchestrator) ForumulatePlan() error {
     </TASK-i>
     `
 
-	session, err := session.NewInstance(session.InstanceOptions{
+	task, err := task.NewTask(task.TaskOptions{
 		Title:    "Planning",
 		Path:     o.Path,
 		Program:  o.Program,
@@ -99,18 +99,18 @@ func (o *Orchestrator) ForumulatePlan() error {
 		return err
 	}
 
-	err = session.SendPrompt(plannerPrompt)
+	err = task.SendPrompt(plannerPrompt)
 	if err != nil {
 		return err
 	}
 
 	// Wait for the session to finish before reading plan
-	err = session.WaitForCompletion()
+	err = task.WaitForCompletion()
 	if err != nil {
 		return err
 	}
 
-	output, err := session.FullOutput()
+	output, err := task.FullOutput()
 	if err != nil {
 		return err
 	}

@@ -2,12 +2,15 @@ package app
 
 import (
 	"claude-squad/config"
+	"claude-squad/instance"
+	"claude-squad/instance/interfaces"
+	"claude-squad/instance/types"
 	"claude-squad/keys"
-	"claude-squad/session"
+	"claude-squad/registry"
 	"claude-squad/ui"
 	"context"
+	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -67,7 +70,7 @@ type home struct {
 	// # Storage and Configuration
 
 	// storage is the interface for saving/loading data to/from the app's state
-	storage *session.Storage
+	storage *instance.Storage[interfaces.Instance]
 	// appConfig stores persistent application configuration
 	appConfig *config.Config
 	// appState stores persistent application state like seen help screens
@@ -78,11 +81,25 @@ func newHome(ctx context.Context, program string, autoYes bool) *home {
 	appConfig := config.LoadConfig()
 	appState := config.LoadState()
 
-	storage, err := session.NewStorage(appState)
-	if err != nil {
-		fmt.Printf("Failed to initialize storage: %v\n", err)
-		os.Exit(1)
+	// Create serialization functions for Instance interface
+	toData := func(i interfaces.Instance) ([]byte, error) {
+		return registry.MarshalInstanceWithType(i)
 	}
+
+	fromData := func(data []byte) (interfaces.Instance, error) {
+		// Unmarshal the instance with type information from the registry
+		var tagged types.TaggedInstance
+		if err := json.Unmarshal(data, &tagged); err != nil {
+			return nil, err
+		}
+		return registry.UnmarshalInstanceWithType(tagged)
+	}
+
+	getTitle := func(i interfaces.Instance) string {
+		return i.StatusText()
+	}
+
+	storage := instance.NewStorage(appState, toData, fromData, getTitle)
 
 	h := &home{
 		ctx:       ctx,
