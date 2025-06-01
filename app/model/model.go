@@ -4,20 +4,18 @@ import (
 	"claude-squad/config"
 	"claude-squad/instance"
 	instanceInterfaces "claude-squad/instance/interfaces"
+	"claude-squad/instance/task"
 	"claude-squad/instance/types"
 	"claude-squad/keys"
 	"claude-squad/registry"
 	"claude-squad/ui"
+	"claude-squad/ui/overlay"
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 )
-
-// Forward declaration to avoid circular dependency
-type Controller struct{}
 
 type Model struct {
 	ctx context.Context
@@ -52,17 +50,7 @@ type Model struct {
 	appState config.AppState
 
 	// Controller will be injected after creation to avoid circular dependency
-	controller ControllerInterface
-}
-
-// ControllerInterface defines what we need from the controller to avoid circular dependency
-type ControllerInterface interface {
-	LoadExistingInstances(storage interface{}) error
-	Render(m interface{}) string
-	Update(m interface{}, msg tea.Msg) (tea.Model, tea.Cmd)
-	HandleQuit(m interface{})
-	GetList() *ui.List
-	GetTabbedWindow() *ui.TabbedWindow
+	controller *Controller
 }
 
 func NewModel(ctx context.Context, program string, autoYes bool) *Model {
@@ -89,30 +77,23 @@ func NewModel(ctx context.Context, program string, autoYes bool) *Model {
 
 	storage := instance.NewStorage(appState, toData, fromData, getTitle)
 
+	spinner := spinner.New(spinner.WithSpinner(spinner.MiniDot))
+
 	h := &Model{
-		ctx:       ctx,
-		spinner:   spinner.New(spinner.WithSpinner(spinner.MiniDot)),
-		menu:      ui.NewMenu(),
-		errBox:    ui.NewErrBox(),
-		storage:   storage,
-		appConfig: appConfig,
-		program:   program,
-		autoYes:   autoYes,
-		state:     tuiStateDefault,
-		appState:  appState,
+		ctx:        ctx,
+		spinner:    spinner,
+		menu:       ui.NewMenu(),
+		errBox:     ui.NewErrBox(),
+		storage:    storage,
+		appConfig:  appConfig,
+		program:    program,
+		autoYes:    autoYes,
+		state:      tuiStateDefault,
+		appState:   appState,
+		controller: NewController(&spinner, autoYes),
 	}
 
 	return h
-}
-
-// SetController injects the controller after creation to avoid circular dependency
-func (m *Model) SetController(controller ControllerInterface) {
-	m.controller = controller
-	if err := controller.LoadExistingInstances(m.storage); err != nil {
-		fmt.Printf("Warning: Failed to load existing instances: %v\n", err)
-	} else {
-		fmt.Printf("Successfully loaded existing instances\n")
-	}
 }
 
 // View renders the UI using the controller
@@ -187,4 +168,99 @@ func (m *Model) handleMenuHighlighting(msg tea.KeyMsg) (cmd tea.Cmd, returnEarly
 	return tea.Batch(
 		func() tea.Msg { return msg },
 		m.keydownCallback(name)), true
+}
+
+// GetErrBox returns the error box interface
+func (m *Model) GetErrBox() *ui.ErrBox {
+	return m.errBox
+}
+
+// GetSpinner returns the spinner model
+func (m *Model) GetSpinner() *spinner.Model {
+	return &m.spinner
+}
+
+// GetProgram returns the program string
+func (m *Model) GetProgram() string {
+	return m.program
+}
+
+// GetAutoYes returns the autoYes setting
+func (m *Model) GetAutoYes() bool {
+	return m.autoYes
+}
+
+// HandleError handles errors by calling the internal handleError method
+func (m *Model) HandleError(err error) tea.Cmd {
+	return m.handleError(err)
+}
+
+// ShowHelpScreen shows a help screen by calling the internal showHelpScreen method
+func (m *Model) ShowHelpScreen(helpTypeInt int, instance interface{}, data interface{}, callback func()) {
+	var taskPtr *task.Task
+	var overlayPtr *overlay.TextOverlay
+
+	if instance != nil {
+		if t, ok := instance.(*task.Task); ok {
+			taskPtr = t
+		}
+	}
+	if data != nil {
+		if o, ok := data.(*overlay.TextOverlay); ok {
+			overlayPtr = o
+		}
+	}
+
+	m.showHelpScreen(helpType(helpTypeInt), taskPtr, overlayPtr, callback)
+}
+
+// HandleMenuHighlighting handles menu highlighting by calling the internal method
+func (m *Model) HandleMenuHighlighting(msg tea.KeyMsg) (tea.Cmd, bool) {
+	return m.handleMenuHighlighting(msg)
+}
+
+// UpdateHandleWindowSizeEvent handles window size events
+func (m *Model) UpdateHandleWindowSizeEvent(msg tea.WindowSizeMsg) {
+	m.updateHandleWindowSizeEvent(msg)
+}
+
+// HandleQuit handles quit events
+func (m *Model) HandleQuit() (tea.Model, tea.Cmd) {
+	return m.handleQuit()
+}
+
+// HandleHelpState handles help state events
+func (m *Model) HandleHelpState(msg tea.KeyMsg, textOverlay interface{}) (tea.Model, tea.Cmd) {
+	if overlay, ok := textOverlay.(*overlay.TextOverlay); ok {
+		return m.handleHelpState(msg, overlay)
+	}
+	return m, nil
+}
+
+// KeydownCallback handles keydown callbacks
+func (m *Model) KeydownCallback(name string) tea.Cmd {
+	if keyName, ok := keys.InstanceModeKeyMap[name]; ok {
+		return m.keydownCallback(keyName)
+	}
+	return nil
+}
+
+// GetStorage returns the storage interface
+func (m *Model) GetStorage() *instance.Storage[instanceInterfaces.Instance] {
+	return m.storage
+}
+
+// GetState returns the current state as an int
+func (m *Model) GetState() int {
+	return int(m.state)
+}
+
+// SetState sets the current state from an int
+func (m *Model) SetState(state int) {
+	m.state = tuiState(state)
+}
+
+// GetMenu returns the menu interface
+func (m *Model) GetMenu() *ui.Menu {
+	return m.menu
 }
