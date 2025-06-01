@@ -1,4 +1,4 @@
-package app
+package Controller
 
 import (
 	"claude-squad/instance"
@@ -27,8 +27,8 @@ const (
 	orchestratorStatePlan
 )
 
-// controller manages instances and orchestrators
-type controller struct {
+// Controller manages instances and orchestrators
+type Controller struct {
 	// newInstanceFinalizer is the finalizer for new instance
 	newInstanceFinalizer func()
 	// promptAfterName is whether to prompt after name
@@ -46,15 +46,15 @@ type controller struct {
 	textOverlay      *overlay.TextOverlay
 }
 
-func newController(spinner *spinner.Model, autoYes bool) *controller {
-	return &controller{
+func NewController(spinner *spinner.Model, autoYes bool) *Controller {
+	return &Controller{
 		list:         ui.NewList(spinner, autoYes),
 		tabbedWindow: ui.NewTabbedWindow(ui.NewPreviewPane(), ui.NewDiffPane()),
 	}
 }
 
 // LoadExistingInstances loads instances from storage into the list
-func (im *controller) LoadExistingInstances(h *home) error {
+func (im *Controller) LoadExistingInstances(h *Model) error {
 	instances, err := h.storage.LoadInstances()
 	if err != nil {
 		return err
@@ -68,7 +68,7 @@ func (im *controller) LoadExistingInstances(h *home) error {
 	return nil
 }
 
-func (im *controller) Render(h *home) string {
+func (im *Controller) Render(h *Model) string {
 	listWithPadding := lipgloss.NewStyle().PaddingTop(1).Render(im.list.String())
 	previewWithPadding := lipgloss.NewStyle().PaddingTop(1).Render(im.tabbedWindow.String())
 	listAndPreview := lipgloss.JoinHorizontal(lipgloss.Top, listWithPadding, previewWithPadding)
@@ -95,7 +95,7 @@ func (im *controller) Render(h *home) string {
 	return mainView
 }
 
-func (im *controller) Update(h *home, msg tea.Msg) (tea.Model, tea.Cmd) {
+func (im *Controller) Update(h *Model, msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case hideErrMsg:
 		h.errBox.Clear()
@@ -128,7 +128,7 @@ func (im *controller) Update(h *home, msg tea.Msg) (tea.Model, tea.Cmd) {
 	return h, nil
 }
 
-func (im *controller) handleMetadataUpdate(h *home) tea.Cmd {
+func (im *Controller) handleMetadataUpdate(h *Model) tea.Cmd {
 	for _, instance := range im.list.GetInstances() {
 		if !instance.Started() || instance.Paused() {
 			continue
@@ -150,7 +150,7 @@ func (im *controller) handleMetadataUpdate(h *home) tea.Cmd {
 	return tickUpdateMetadataCmd
 }
 
-func (im *controller) handleMouseEvent(h *home, msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+func (im *Controller) handleMouseEvent(h *Model, msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// Handle mouse wheel scrolling in the diff view
 	if im.tabbedWindow.IsInDiffTab() {
 		if msg.Action == tea.MouseActionPress {
@@ -169,7 +169,7 @@ func (im *controller) handleMouseEvent(h *home, msg tea.MouseMsg) (tea.Model, te
 	return h, nil
 }
 
-func (im *controller) handleKeyEvent(h *home, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (im *Controller) handleKeyEvent(h *Model, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Handle prompt state key events
 	if h.state == tuiStatePrompt && im.textInputOverlay != nil {
 		return im.handlePromptKeyEvent(h, msg)
@@ -179,7 +179,7 @@ func (im *controller) handleKeyEvent(h *home, msg tea.KeyMsg) (tea.Model, tea.Cm
 	return im.handleKeyPress(h, msg)
 }
 
-func (im *controller) handlePromptKeyEvent(h *home, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (im *Controller) handlePromptKeyEvent(h *Model, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	shouldClose := im.textInputOverlay.HandleKeyPress(msg)
 	if !shouldClose {
 		return h, nil
@@ -217,7 +217,7 @@ func (im *controller) handlePromptKeyEvent(h *home, msg tea.KeyMsg) (tea.Model, 
 	)
 }
 
-func (im *controller) handleKeyPress(h *home, msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
+func (im *Controller) handleKeyPress(h *Model, msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 	cmd, returnEarly := h.handleMenuHighlighting(msg)
 	if returnEarly {
 		return h, cmd
@@ -287,7 +287,7 @@ func (im *controller) handleKeyPress(h *home, msg tea.KeyMsg) (mod tea.Model, cm
 	}
 }
 
-func (im *controller) handleNewInstanceState(h *home, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (im *Controller) handleNewInstanceState(h *Model, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Handle quit commands first. Don't handle q because the user might want to type that.
 	if msg.String() == "ctrl+c" {
 		h.state = tuiStateDefault
@@ -341,7 +341,7 @@ func (im *controller) handleNewInstanceState(h *home, msg tea.KeyMsg) (tea.Model
 	return h, nil
 }
 
-func (im *controller) finalizeNewInstance(h *home, instance *task.Task) (tea.Model, tea.Cmd) {
+func (im *Controller) finalizeNewInstance(h *Model, instance *task.Task) (tea.Model, tea.Cmd) {
 	if len(instance.Title) == 0 {
 		return h, h.handleError(fmt.Errorf("title cannot be empty"))
 	}
@@ -379,7 +379,7 @@ func (im *controller) finalizeNewInstance(h *home, instance *task.Task) (tea.Mod
 	return h, tea.Batch(tea.WindowSize(), im.instanceChanged(h))
 }
 
-func (im *controller) handleNewInstance(h *home, promptAfter bool) (tea.Model, tea.Cmd) {
+func (im *Controller) handleNewInstance(h *Model, promptAfter bool) (tea.Model, tea.Cmd) {
 	if im.list.NumInstances() >= GlobalInstanceLimit {
 		return h, h.handleError(
 			fmt.Errorf("you can't create more than %d instances", GlobalInstanceLimit))
@@ -402,7 +402,7 @@ func (im *controller) handleNewInstance(h *home, promptAfter bool) (tea.Model, t
 	return h, nil
 }
 
-func (im *controller) handleNewOrchestrator(h *home) (tea.Model, tea.Cmd) {
+func (im *Controller) handleNewOrchestrator(h *Model) (tea.Model, tea.Cmd) {
 	// Create an orchestrator instance - similar to KeyPrompt but for orchestration
 	h.state = tuiStatePrompt
 	h.menu.SetState(ui.StatePrompt)
@@ -415,7 +415,7 @@ func (im *controller) handleNewOrchestrator(h *home) (tea.Model, tea.Cmd) {
 	return h, nil
 }
 
-func (im *controller) handleKillInstance(h *home) (tea.Model, tea.Cmd) {
+func (im *Controller) handleKillInstance(h *Model) (tea.Model, tea.Cmd) {
 	selected := im.list.GetSelectedInstance()
 	if selected == nil {
 		return h, nil
@@ -445,7 +445,7 @@ func (im *controller) handleKillInstance(h *home) (tea.Model, tea.Cmd) {
 	return h, im.instanceChanged(h)
 }
 
-func (im *controller) handleSubmitChanges(h *home) (tea.Model, tea.Cmd) {
+func (im *Controller) handleSubmitChanges(h *Model) (tea.Model, tea.Cmd) {
 	selected := im.list.GetSelectedInstance()
 	if selected == nil {
 		return h, nil
@@ -464,7 +464,7 @@ func (im *controller) handleSubmitChanges(h *home) (tea.Model, tea.Cmd) {
 	return h, nil
 }
 
-func (im *controller) handleCheckoutInstance(h *home) (tea.Model, tea.Cmd) {
+func (im *Controller) handleCheckoutInstance(h *Model) (tea.Model, tea.Cmd) {
 	selected := im.list.GetSelectedInstance()
 	if selected == nil {
 		return h, nil
@@ -480,7 +480,7 @@ func (im *controller) handleCheckoutInstance(h *home) (tea.Model, tea.Cmd) {
 	return h, nil
 }
 
-func (im *controller) handleResumeInstance(h *home) (tea.Model, tea.Cmd) {
+func (im *Controller) handleResumeInstance(h *Model) (tea.Model, tea.Cmd) {
 	selected := im.list.GetSelectedInstance()
 	if selected == nil {
 		return h, nil
@@ -491,7 +491,7 @@ func (im *controller) handleResumeInstance(h *home) (tea.Model, tea.Cmd) {
 	return h, tea.WindowSize()
 }
 
-func (im *controller) handleAttachInstance(h *home) (tea.Model, tea.Cmd) {
+func (im *Controller) handleAttachInstance(h *Model) (tea.Model, tea.Cmd) {
 	if im.list.NumInstances() == 0 {
 		return h, nil
 	}
@@ -512,7 +512,7 @@ func (im *controller) handleAttachInstance(h *home) (tea.Model, tea.Cmd) {
 	return h, nil
 }
 
-func (im *controller) instanceChanged(h *home) tea.Cmd {
+func (im *Controller) instanceChanged(h *Model) tea.Cmd {
 	// selected may be nil
 	selected := im.list.GetSelectedInstance()
 
@@ -528,7 +528,7 @@ func (im *controller) instanceChanged(h *home) tea.Cmd {
 }
 
 // generateOrchestratorPlan generates a plan from the user's prompt and shows it for approval
-func (im *controller) generateOrchestratorPlan(h *home, prompt string) (tea.Model, tea.Cmd) {
+func (im *Controller) generateOrchestratorPlan(h *Model, prompt string) (tea.Model, tea.Cmd) {
 	return h, func() tea.Msg {
 		orch := orchestrator.NewOrchestrator(h.program, prompt)
 		im.instances = append(im.instances, orch)
@@ -540,7 +540,7 @@ func (im *controller) generateOrchestratorPlan(h *home, prompt string) (tea.Mode
 }
 
 // handleOrchestratorPlanApproval handles when user approves the orchestrator plan
-func (im *controller) handleOrchestratorPlanApproval(h *home) (tea.Model, tea.Cmd) {
+func (im *Controller) handleOrchestratorPlanApproval(h *Model) (tea.Model, tea.Cmd) {
 	// For testing purposes, just show a success message
 	return h, func() tea.Msg {
 		// Show success message
@@ -553,7 +553,7 @@ func (im *controller) handleOrchestratorPlanApproval(h *home) (tea.Model, tea.Cm
 }
 
 // handleOrchestratorPlanKeyPress handles key presses when showing orchestrator plan for approval
-func (im *controller) handleOrchestratorPlanKeyPress(h *home, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (im *Controller) handleOrchestratorPlanKeyPress(h *Model, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		// User approved the plan
@@ -577,7 +577,7 @@ func (im *controller) handleOrchestratorPlanKeyPress(h *home, msg tea.KeyMsg) (t
 	}
 }
 
-func (im *controller) HandleQuit(h *home) (tea.Model, tea.Cmd) {
+func (im *Controller) HandleQuit(h *Model) (tea.Model, tea.Cmd) {
 	if err := h.storage.SaveInstances(im.instances); err != nil {
 		return h, h.handleError(err)
 	}

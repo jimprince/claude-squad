@@ -1,4 +1,4 @@
-package app
+package model
 
 import (
 	"claude-squad/instance/task"
@@ -109,7 +109,7 @@ func (h helpType) ToContent(task *task.Task) string {
 }
 
 // showHelpScreen displays the help screen overlay if it hasn't been shown before
-func (m *home) showHelpScreen(helpType helpType, task *task.Task, textOverlay *overlay.TextOverlay, onDismiss func()) (tea.Model, tea.Cmd) {
+func (m *Model) showHelpScreen(helpType helpType, task *task.Task, textOverlay *overlay.TextOverlay, onDismiss func()) (tea.Model, tea.Cmd) {
 	// Get the flag for this help type
 	var helpFlag uint32
 	switch helpType {
@@ -147,7 +147,7 @@ func (m *home) showHelpScreen(helpType helpType, task *task.Task, textOverlay *o
 }
 
 // handleHelpState handles key events when in help state
-func (m *home) handleHelpState(msg tea.KeyMsg, textOverlay *overlay.TextOverlay) (tea.Model, tea.Cmd) {
+func (m *Model) handleHelpState(msg tea.KeyMsg, textOverlay *overlay.TextOverlay) (tea.Model, tea.Cmd) {
 	// Any key press will close the help overlay
 	shouldClose := textOverlay.HandleKeyPress(msg)
 	if shouldClose {

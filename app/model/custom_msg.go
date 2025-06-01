@@ -1,4 +1,4 @@
-package app
+package model
 
 import (
 	"claude-squad/keys"
@@ -12,7 +12,7 @@ import (
 type keyupMsg struct{}
 
 // keydownCallback clears the menu option highlighting after 500ms.
-func (m *home) keydownCallback(name keys.KeyName) tea.Cmd {
+func (m *Model) keydownCallback(name keys.KeyName) tea.Cmd {
 	m.menu.Keydown(name)
 	return func() tea.Msg {
 		select {
@@ -29,7 +29,7 @@ type hideErrMsg struct{}
 
 // handleError handles all errors which get bubbled up to the app. sets the error message. We return a callback tea.Cmd that returns a hideErrMsg message
 // which clears the error message after 3 seconds.
-func (m *home) handleError(err error) tea.Cmd {
+func (m *Model) handleError(err error) tea.Cmd {
 	log.ErrorLog.Printf("%v", err)
 	m.errBox.SetError(err)
 	return func() tea.Msg {
