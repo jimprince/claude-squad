@@ -3,7 +3,7 @@ package model
 import (
 	"claude-squad/config"
 	"claude-squad/instance"
-	"claude-squad/instance/interfaces"
+	instanceInterfaces "claude-squad/instance/interfaces"
 	"claude-squad/instance/types"
 	"claude-squad/keys"
 	"claude-squad/registry"
@@ -11,11 +11,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+// Forward declaration to avoid circular dependency
+type Controller struct{}
 
 type Model struct {
 	ctx context.Context
@@ -24,8 +26,6 @@ type Model struct {
 
 	// state is the current discrete state of the app
 	state tuiState
-	// controller manages instances and orchestrators
-	controller *controller.Controller
 	// program is the program to use for instances and orchestrators
 	program string
 	// autoYes is whether to automatically approve actions
@@ -45,11 +45,24 @@ type Model struct {
 	// # Storage and Configuration
 
 	// storage is the interface for saving/loading data to/from the app's state
-	storage *instance.Storage[interfaces.Instance]
+	storage *instance.Storage[instanceInterfaces.Instance]
 	// appConfig stores persistent application configuration
 	appConfig *config.Config
 	// appState stores persistent application state like seen help screens
 	appState config.AppState
+
+	// Controller will be injected after creation to avoid circular dependency
+	controller ControllerInterface
+}
+
+// ControllerInterface defines what we need from the controller to avoid circular dependency
+type ControllerInterface interface {
+	LoadExistingInstances(storage interface{}) error
+	Render(m interface{}) string
+	Update(m interface{}, msg tea.Msg) (tea.Model, tea.Cmd)
+	HandleQuit(m interface{})
+	GetList() *ui.List
+	GetTabbedWindow() *ui.TabbedWindow
 }
 
 func NewModel(ctx context.Context, program string, autoYes bool) *Model {
@@ -57,11 +70,11 @@ func NewModel(ctx context.Context, program string, autoYes bool) *Model {
 	appState := config.LoadState()
 
 	// Create serialization functions for Instance interface
-	toData := func(i interfaces.Instance) ([]byte, error) {
+	toData := func(i instanceInterfaces.Instance) ([]byte, error) {
 		return registry.MarshalInstanceWithType(i)
 	}
 
-	fromData := func(data []byte) (interfaces.Instance, error) {
+	fromData := func(data []byte) (instanceInterfaces.Instance, error) {
 		// Unmarshal the instance with type information from the registry
 		var tagged types.TaggedInstance
 		if err := json.Unmarshal(data, &tagged); err != nil {
@@ -70,7 +83,7 @@ func NewModel(ctx context.Context, program string, autoYes bool) *Model {
 		return registry.UnmarshalInstanceWithType(tagged)
 	}
 
-	getTitle := func(i interfaces.Instance) string {
+	getTitle := func(i instanceInterfaces.Instance) string {
 		return i.StatusText()
 	}
 
@@ -89,18 +102,25 @@ func NewModel(ctx context.Context, program string, autoYes bool) *Model {
 		appState:  appState,
 	}
 
-	controller := NewController(&h.spinner, h.autoYes)
-	if err := controller.LoadExistingInstances(h); err != nil {
-		fmt.Printf("Warning: Failed to load existing instances: %v\n", err)
-	}
-	h.controller = controller
-
 	return h
 }
 
-// View renders the UI using the instance mode directly.
+// SetController injects the controller after creation to avoid circular dependency
+func (m *Model) SetController(controller ControllerInterface) {
+	m.controller = controller
+	if err := controller.LoadExistingInstances(m.storage); err != nil {
+		fmt.Printf("Warning: Failed to load existing instances: %v\n", err)
+	} else {
+		fmt.Printf("Successfully loaded existing instances\n")
+	}
+}
+
+// View renders the UI using the controller
 func (m *Model) View() string {
-	return m.controller.Render(m)
+	if m.controller != nil {
+		return m.controller.Render(m)
+	}
+	return "Loading..."
 }
 
 // updateHandleWindowSizeEvent sets the sizes of the components.
@@ -114,13 +134,15 @@ func (m *Model) updateHandleWindowSizeEvent(msg tea.WindowSizeMsg) {
 	m.menu.SetSize(msg.Width, menuHeight)
 
 	// Set sizes for instance mode components
-	// Split the content width between list and preview
-	// List takes ~40% of width, preview takes ~60%
-	listWidth := int(float32(msg.Width) * 0.4)
-	previewWidth := msg.Width - listWidth
+	if m.controller != nil {
+		// Split the content width between list and preview
+		// List takes ~40% of width, preview takes ~60%
+		listWidth := int(float32(msg.Width) * 0.4)
+		previewWidth := msg.Width - listWidth
 
-	m.controller.list.SetSize(listWidth, contentHeight)
-	m.controller.tabbedWindow.SetSize(previewWidth, contentHeight)
+		m.controller.GetList().SetSize(listWidth, contentHeight)
+		m.controller.GetTabbedWindow().SetSize(previewWidth, contentHeight)
+	}
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -128,20 +150,20 @@ func (m *Model) Init() tea.Cmd {
 	// update the spinner, which sends a new spinner.TickMsg. I think this lasts forever lol.
 	return tea.Batch(
 		m.spinner.Tick,
-		func() tea.Msg {
-			time.Sleep(100 * time.Millisecond)
-			return previewTickMsg{}
-		},
-		tickUpdateMetadataCmd,
 	)
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	return m.controller.Update(m, msg)
+	if m.controller != nil {
+		return m.controller.Update(m, msg)
+	}
+	return m, nil
 }
 
 func (m *Model) handleQuit() (tea.Model, tea.Cmd) {
-	m.controller.HandleQuit(m)
+	if m.controller != nil {
+		m.controller.HandleQuit(m)
+	}
 	return m, tea.Quit
 }
 
