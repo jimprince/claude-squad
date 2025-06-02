@@ -1,36 +1,17 @@
 package model
 
 import (
-	"claude-squad/instance"
 	instanceInterfaces "claude-squad/instance/interfaces"
-	"claude-squad/instance/orchestrator"
 	"claude-squad/instance/task"
 	"claude-squad/keys"
 	"claude-squad/log"
 	"claude-squad/ui"
 	"claude-squad/ui/overlay"
-	"fmt"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-)
-
-// TUI states
-const (
-	TUIStateDefault = iota
-	TUIStatePrompt
-	TUIStateHelp
-	TUIStateNew
-)
-
-// Help types
-const (
-	HelpTypeGeneral = iota
-	HelpTypeInstanceStart
-	HelpTypeInstanceCheckout
-	HelpTypeInstanceAttach
 )
 
 // Global instance limit
@@ -51,7 +32,7 @@ const (
 type Controller struct {
 	// newInstanceFinalizer is the finalizer for new instance
 	newInstanceFinalizer func()
-	// promptAfterName is whether to prompt after name
+	// promptAfterName is whether to prompt after naming an instance
 	promptAfterName bool
 	// orchestratorState is the state of the orchestrator
 	orchestratorState orchestratorState
@@ -73,23 +54,6 @@ func NewController(spinner *spinner.Model, autoYes bool) *Controller {
 	}
 }
 
-// LoadExistingInstances loads instances from storage into the list
-func (c *Controller) LoadExistingInstances(storage *instance.Storage[instanceInterfaces.Instance]) error {
-	instances, err := storage.LoadInstances()
-	if err != nil {
-		return err
-	}
-
-	for _, instance := range instances {
-		finalizer := c.list.AddInstance(instance.(*task.Task))
-		finalizer() // Call finalizer immediately since instance is already started
-	}
-
-	c.instances = instances
-
-	return nil
-}
-
 func (c *Controller) Render(model *Model) string {
 	listWithPadding := lipgloss.NewStyle().PaddingTop(1).Render(c.list.String())
 	previewWithPadding := lipgloss.NewStyle().PaddingTop(1).Render(c.tabbedWindow.String())
@@ -98,16 +62,16 @@ func (c *Controller) Render(model *Model) string {
 	mainView := lipgloss.JoinVertical(
 		lipgloss.Center,
 		listAndPreview,
-		model.GetMenu().String(),
-		model.GetErrBox().String(),
+		model.menu.String(),
+		model.errBox.String(),
 	)
 
-	if model.GetState() == TUIStatePrompt {
+	if model.state == tuiStatePrompt {
 		if c.textInputOverlay == nil {
 			log.ErrorLog.Printf("text input overlay is nil")
 		}
 		return overlay.PlaceOverlay(0, 0, c.textInputOverlay.Render(), mainView, true, true)
-	} else if model.GetState() == TUIStateHelp {
+	} else if model.state == tuiStateHelp {
 		if c.textOverlay == nil {
 			log.ErrorLog.Printf("text overlay is nil")
 		}
@@ -120,7 +84,7 @@ func (c *Controller) Render(model *Model) string {
 func (c *Controller) Update(model *Model, msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case hideErrMsg:
-		model.GetErrBox().Clear()
+		model.errBox.Clear()
 	case previewTickMsg:
 		cmd := c.instanceChanged(model)
 		return model, tea.Batch(
@@ -131,7 +95,7 @@ func (c *Controller) Update(model *Model, msg tea.Msg) (tea.Model, tea.Cmd) {
 			},
 		)
 	case keyupMsg:
-		model.GetMenu().ClearKeydown()
+		model.menu.ClearKeydown()
 		return model, nil
 	case tickUpdateMetadataMessage:
 		return model, c.handleMetadataUpdate()
@@ -143,9 +107,9 @@ func (c *Controller) Update(model *Model, msg tea.Msg) (tea.Model, tea.Cmd) {
 		model.UpdateHandleWindowSizeEvent(msg)
 		return model, nil
 	case spinner.TickMsg:
-		spinner := model.GetSpinner()
+		spinner := model.spinner
 		var cmd tea.Cmd
-		*spinner, cmd = spinner.Update(msg)
+		_, cmd = spinner.Update(msg)
 		return model, cmd
 	}
 	return model, nil
@@ -194,7 +158,7 @@ func (c *Controller) handleMouseEvent(model *Model, msg tea.MouseMsg) (tea.Model
 
 func (c *Controller) handleKeyEvent(model *Model, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Handle prompt state key events
-	if model.GetState() == TUIStatePrompt && c.textInputOverlay != nil {
+	if model.state == tuiStatePrompt && c.textInputOverlay != nil {
 		return c.handlePromptKeyEvent(model, msg)
 	}
 
@@ -220,7 +184,7 @@ func (c *Controller) handlePromptKeyEvent(model *Model, msg tea.KeyMsg) (tea.Mod
 			selected := c.list.GetSelectedInstance()
 			if selected != nil {
 				if err := selected.SendPrompt(c.textInputOverlay.GetValue()); err != nil {
-					return model, model.HandleError(err)
+					return model, model.handleError(err)
 				}
 			}
 		}
@@ -229,12 +193,12 @@ func (c *Controller) handlePromptKeyEvent(model *Model, msg tea.KeyMsg) (tea.Mod
 	// Close the overlay and reset state
 	c.textInputOverlay = nil
 	// c.isOrchestratorPrompt = false
-	model.SetState(TUIStateDefault)
+	model.state = tuiStateDefault
 	return model, tea.Sequence(
 		tea.WindowSize(),
 		func() tea.Msg {
-			model.GetMenu().SetState(ui.StateDefault)
-			model.ShowHelpScreen(HelpTypeInstanceStart, nil, nil, nil)
+			model.menu.SetState(ui.StateDefault)
+			model.ShowHelpScreen(helpTypeInstanceStart, nil, nil, nil)
 			return nil
 		},
 	)
@@ -246,7 +210,7 @@ func (c *Controller) handleKeyPress(model *Model, msg tea.KeyMsg) (mod tea.Model
 		return model, cmd
 	}
 
-	if model.GetState() == TUIStateHelp {
+	if model.state == tuiStateHelp {
 		// // Check if we're showing an orchestrator plan for approval
 		// if c.orchestratorPlan != "" && c.textOverlay != nil {
 		// 	return c.handleOrchestratorPlanKeyPress(model, msg)
@@ -254,7 +218,7 @@ func (c *Controller) handleKeyPress(model *Model, msg tea.KeyMsg) (mod tea.Model
 		return model.HandleHelpState(msg, c.textOverlay)
 	}
 
-	if model.GetState() == TUIStateNew {
+	if model.state == tuiStateNew {
 		return c.handleNewInstanceState(model, msg)
 	}
 
@@ -271,11 +235,11 @@ func (c *Controller) handleKeyPress(model *Model, msg tea.KeyMsg) (mod tea.Model
 	switch name {
 	case keys.KeyHelp:
 		return model, tea.Cmd(func() tea.Msg {
-			model.ShowHelpScreen(HelpTypeGeneral, nil, nil, nil)
+			model.ShowHelpScreen(helpTypeGeneral, nil, nil, nil)
 			return nil
 		})
 	case keys.KeyPrompt, keys.KeyNew:
-		return c.handleNewInstance(model, name == keys.KeyPrompt)
+		return c.handleNewTask(model, name == keys.KeyPrompt)
 	case keys.KeyOrchestrator:
 		return c.handleNewOrchestrator(model)
 	case keys.KeyUp:
@@ -296,7 +260,7 @@ func (c *Controller) handleKeyPress(model *Model, msg tea.KeyMsg) (mod tea.Model
 		return model, c.instanceChanged(model)
 	case keys.KeyTab:
 		c.tabbedWindow.Toggle()
-		model.GetMenu().SetInDiffTab(c.tabbedWindow.IsInDiffTab())
+		model.menu.SetInDiffTab(c.tabbedWindow.IsInDiffTab())
 		return model, c.instanceChanged(model)
 	case keys.KeyKill:
 		return c.handleKillInstance(model)
@@ -313,303 +277,7 @@ func (c *Controller) handleKeyPress(model *Model, msg tea.KeyMsg) (mod tea.Model
 	}
 }
 
-func (c *Controller) handleNewInstanceState(model *Model, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Handle quit commands first. Don't handle q because the user might want to type that.
-	if msg.String() == "ctrl+c" {
-		model.SetState(TUIStateDefault)
-		c.promptAfterName = false
-		c.list.Kill()
-		return model, tea.Sequence(
-			tea.WindowSize(),
-			func() tea.Msg {
-				model.GetMenu().SetState(ui.StateDefault)
-				return nil
-			},
-		)
-	}
-
-	instance := c.list.GetInstances()[c.list.NumInstances()-1]
-	switch msg.Type {
-	case tea.KeyEnter:
-		return c.finalizeNewInstance(model, instance)
-	case tea.KeyRunes:
-		if len(instance.Title) >= 32 {
-			return model, model.HandleError(fmt.Errorf("title cannot be longer than 32 characters"))
-		}
-		if err := instance.SetTitle(instance.Title + string(msg.Runes)); err != nil {
-			return model, model.HandleError(err)
-		}
-	case tea.KeyBackspace:
-		if len(instance.Title) == 0 {
-			return model, nil
-		}
-		if err := instance.SetTitle(instance.Title[:len(instance.Title)-1]); err != nil {
-			return model, model.HandleError(err)
-		}
-	case tea.KeySpace:
-		if err := instance.SetTitle(instance.Title + " "); err != nil {
-			return model, model.HandleError(err)
-		}
-	case tea.KeyEsc:
-		c.list.Kill()
-		model.SetState(TUIStateDefault)
-		c.instanceChanged(model)
-
-		return model, tea.Sequence(
-			tea.WindowSize(),
-			func() tea.Msg {
-				model.GetMenu().SetState(ui.StateDefault)
-				return nil
-			},
-		)
-	default:
-	}
-	return model, nil
-}
-
-func (c *Controller) finalizeNewInstance(model *Model, instance *task.Task) (tea.Model, tea.Cmd) {
-	if len(instance.Title) == 0 {
-		return model, model.HandleError(fmt.Errorf("title cannot be empty"))
-	}
-
-	if err := instance.Start(true); err != nil {
-		c.list.Kill()
-		model.SetState(TUIStateDefault)
-		return model, model.HandleError(err)
-	}
-
-	c.instances = append(c.instances, instance)
-	// Save after adding new instance
-	if err := model.GetStorage().SaveInstances(c.instances); err != nil {
-		return model, model.HandleError(err)
-	}
-	// Instance added successfully, call the finalizer.
-	c.newInstanceFinalizer()
-	if model.GetAutoYes() {
-		instance.AutoYes = true
-	}
-
-	c.newInstanceFinalizer()
-	model.SetState(TUIStateDefault)
-	if c.promptAfterName {
-		model.SetState(TUIStatePrompt)
-		model.GetMenu().SetState(ui.StatePrompt)
-		// Initialize the text input overlay
-		c.textInputOverlay = overlay.NewTextInputOverlay("Enter prompt", "")
-		// Set proper size for the overlay
-		c.textInputOverlay.SetSize(80, 20) // Match orchestrator overlay size
-		c.promptAfterName = false
-	} else {
-		model.GetMenu().SetState(ui.StateDefault)
-		model.ShowHelpScreen(HelpTypeInstanceStart, instance, nil, nil)
-	}
-
-	return model, tea.Batch(tea.WindowSize(), c.instanceChanged(model))
-}
-
-func (c *Controller) handleNewInstance(model *Model, promptAfter bool) (tea.Model, tea.Cmd) {
-	if c.list.NumInstances() >= GlobalInstanceLimit {
-		return model, model.HandleError(
-			fmt.Errorf("you can't create more than %d instances", GlobalInstanceLimit))
-	}
-	instance, err := task.NewTask(task.TaskOptions{
-		Title:   "",
-		Path:    ".",
-		Program: model.GetProgram(),
-	})
-	if err != nil {
-		return model, model.HandleError(err)
-	}
-
-	c.newInstanceFinalizer = c.list.AddInstance(instance)
-	c.list.SetSelectedInstance(c.list.NumInstances() - 1)
-	model.SetState(TUIStateNew)
-	model.GetMenu().SetState(ui.StateNewInstance)
-	c.promptAfterName = promptAfter
-
-	return model, nil
-}
-
-func (c *Controller) handleNewOrchestrator(model *Model) (tea.Model, tea.Cmd) {
-	// Create an orchestrator instance - similar to KeyPrompt but for orchestration
-	model.SetState(TUIStatePrompt)
-	model.GetMenu().SetState(ui.StatePrompt)
-	// Initialize the text input overlay for orchestrator goal
-	c.textInputOverlay = overlay.NewTextInputOverlay("Enter orchestration goal", "")
-	// Set proper size for the overlay (should match other overlays)
-	c.textInputOverlay.SetSize(80, 20)
-	c.promptAfterName = false
-	// c.isOrchestratorPrompt = true
-	return model, nil
-}
-
-func (c *Controller) handleKillInstance(model *Model) (tea.Model, tea.Cmd) {
-	selected := c.list.GetSelectedInstance()
-	if selected == nil {
-		return model, nil
-	}
-
-	worktree, err := selected.GetGitWorktree()
-	if err != nil {
-		return model, model.HandleError(err)
-	}
-
-	checkedOut, err := worktree.IsBranchCheckedOut()
-	if err != nil {
-		return model, model.HandleError(err)
-	}
-
-	if checkedOut {
-		return model, model.HandleError(fmt.Errorf("instance %s is currently checked out", selected.Title))
-	}
-
-	// Delete from storage first
-	if err := model.GetStorage().DeleteInstance(selected.Title); err != nil {
-		return model, model.HandleError(err)
-	}
-
-	// Then kill the instance
-	c.list.Kill()
-	return model, c.instanceChanged(model)
-}
-
-func (c *Controller) handleSubmitChanges(model *Model) (tea.Model, tea.Cmd) {
-	selected := c.list.GetSelectedInstance()
-	if selected == nil {
-		return model, nil
-	}
-
-	// Default commit message with timestamp
-	commitMsg := fmt.Sprintf("[claudesquad] update from '%s' on %s", selected.Title, time.Now().Format(time.RFC822))
-	worktree, err := selected.GetGitWorktree()
-	if err != nil {
-		return model, model.HandleError(err)
-	}
-	if err = worktree.PushChanges(commitMsg, true); err != nil {
-		return model, model.HandleError(err)
-	}
-
-	return model, nil
-}
-
-func (c *Controller) handleCheckoutInstance(model *Model) (tea.Model, tea.Cmd) {
-	selected := c.list.GetSelectedInstance()
-	if selected == nil {
-		return model, nil
-	}
-
-	// Show help screen before pausing
-	model.ShowHelpScreen(HelpTypeInstanceCheckout, selected, nil, func() {
-		if err := selected.Pause(); err != nil {
-			model.HandleError(err)
-		}
-		c.instanceChanged(model)
-	})
-	return model, nil
-}
-
-func (c *Controller) handleResumeInstance(model *Model) (tea.Model, tea.Cmd) {
-	selected := c.list.GetSelectedInstance()
-	if selected == nil {
-		return model, nil
-	}
-	if err := selected.Resume(); err != nil {
-		return model, model.HandleError(err)
-	}
-	return model, tea.WindowSize()
-}
-
-func (c *Controller) handleAttachInstance(model *Model) (tea.Model, tea.Cmd) {
-	if c.list.NumInstances() == 0 {
-		return model, nil
-	}
-	selected := c.list.GetSelectedInstance()
-	if selected == nil || selected.Paused() || !selected.TmuxAlive() {
-		return model, nil
-	}
-	// Show help screen before attaching
-	model.ShowHelpScreen(HelpTypeInstanceAttach, selected, nil, func() {
-		ch, err := c.list.Attach()
-		if err != nil {
-			model.HandleError(err)
-			return
-		}
-		<-ch
-		model.SetState(TUIStateDefault)
-	})
-	return model, nil
-}
-
-func (c *Controller) instanceChanged(model *Model) tea.Cmd {
-	// selected may be nil
-	selected := c.list.GetSelectedInstance()
-
-	c.tabbedWindow.UpdateDiff(selected)
-	// Update menu with current instance
-	model.GetMenu().SetInstance(selected)
-
-	// If there's no selected instance, we don't need to update the preview.
-	if err := c.tabbedWindow.UpdatePreview(selected); err != nil {
-		return model.HandleError(err)
-	}
-	return nil
-}
-
-// generateOrchestratorPlan generates a plan from the user's prompt and shows it for approval
-func (c *Controller) generateOrchestratorPlan(model *Model, prompt string) (tea.Model, tea.Cmd) {
-	return model, func() tea.Msg {
-		orch := orchestrator.NewOrchestrator(model.GetProgram(), prompt)
-		c.instances = append(c.instances, orch)
-
-		orch.ForumulatePlan()
-
-		return tea.WindowSize()
-	}
-}
-
-// handleOrchestratorPlanApproval handles when user approves the orchestrator plan
-func (c *Controller) handleOrchestratorPlanApproval(model *Model) (tea.Model, tea.Cmd) {
-	// For testing purposes, just show a success message
-	return model, func() tea.Msg {
-		// Show success message
-		successMessage := "Plan Approved\n\nOrchestration plan has been approved. For testing purposes, no workers will be created."
-		c.textOverlay = overlay.NewTextOverlay(successMessage)
-
-		model.SetState(TUIStateHelp) // Show the text overlay
-		return tea.WindowSize()
-	}
-}
-
-// handleOrchestratorPlanKeyPress handles key presses when showing orchestrator plan for approval
-func (c *Controller) handleOrchestratorPlanKeyPress(model *Model, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "enter":
-		// User approved the plan
-		// c.orchestratorPlan = ""
-		return c.handleOrchestratorPlanApproval(model)
-	case "esc", "q":
-		// User cancelled the plan
-		// c.orchestratorPlan = ""
-		c.textOverlay = nil
-		model.SetState(TUIStateDefault)
-		return model, tea.Sequence(
-			tea.WindowSize(),
-			func() tea.Msg {
-				model.GetMenu().SetState(ui.StateDefault)
-				return nil
-			},
-		)
-	default:
-		// Any other key shows help about the plan approval
-		return model, nil
-	}
-}
-
-func (c *Controller) HandleQuit(model *Model) {
-	if err := model.GetStorage().SaveInstances(c.instances); err != nil {
-		model.HandleError(err)
-	}
-}
+// Implementation moved to tasks.go
 
 // GetList returns the list component
 func (c *Controller) GetList() *ui.List {
@@ -619,4 +287,11 @@ func (c *Controller) GetList() *ui.List {
 // GetTabbedWindow returns the tabbedWindow component
 func (c *Controller) GetTabbedWindow() *ui.TabbedWindow {
 	return c.tabbedWindow
+}
+
+// HandleQuit handles the quit action
+func (c *Controller) HandleQuit(model *Model) {
+	if err := model.storage.SaveInstances(c.instances); err != nil {
+		model.handleError(err)
+	}
 }

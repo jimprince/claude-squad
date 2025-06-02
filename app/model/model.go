@@ -17,6 +17,18 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+type tuiState int
+
+const (
+	tuiStateDefault tuiState = iota
+	// tuiStateNew is the state when the user is creating a new instance.
+	tuiStateNew
+	// tuiStatePrompt is the state when the user is entering a prompt.
+	tuiStatePrompt
+	// tuiStateHelp is the state when a help screen is displayed.
+	tuiStateHelp
+)
+
 type Model struct {
 	ctx context.Context
 
@@ -98,10 +110,7 @@ func NewModel(ctx context.Context, program string, autoYes bool) *Model {
 
 // View renders the UI using the controller
 func (m *Model) View() string {
-	if m.controller != nil {
-		return m.controller.Render(m)
-	}
-	return "Loading..."
+	return m.controller.Render(m)
 }
 
 // updateHandleWindowSizeEvent sets the sizes of the components.
@@ -155,9 +164,11 @@ func (m *Model) handleMenuHighlighting(msg tea.KeyMsg) (cmd tea.Cmd, returnEarly
 		m.keySent = false
 		return nil, false
 	}
+
 	if m.state == tuiStatePrompt || m.state == tuiStateHelp {
 		return nil, false
 	}
+
 	// If it's in the instance mode keymap, we should try to highlight it.
 	name, ok := keys.InstanceModeKeyMap[msg.String()]
 	if !ok {
@@ -170,33 +181,8 @@ func (m *Model) handleMenuHighlighting(msg tea.KeyMsg) (cmd tea.Cmd, returnEarly
 		m.keydownCallback(name)), true
 }
 
-// GetErrBox returns the error box interface
-func (m *Model) GetErrBox() *ui.ErrBox {
-	return m.errBox
-}
-
-// GetSpinner returns the spinner model
-func (m *Model) GetSpinner() *spinner.Model {
-	return &m.spinner
-}
-
-// GetProgram returns the program string
-func (m *Model) GetProgram() string {
-	return m.program
-}
-
-// GetAutoYes returns the autoYes setting
-func (m *Model) GetAutoYes() bool {
-	return m.autoYes
-}
-
-// HandleError handles errors by calling the internal handleError method
-func (m *Model) HandleError(err error) tea.Cmd {
-	return m.handleError(err)
-}
-
 // ShowHelpScreen shows a help screen by calling the internal showHelpScreen method
-func (m *Model) ShowHelpScreen(helpTypeInt int, instance interface{}, data interface{}, callback func()) {
+func (m *Model) ShowHelpScreen(helpType helpType, instance interface{}, data interface{}, callback func()) {
 	var taskPtr *task.Task
 	var overlayPtr *overlay.TextOverlay
 
@@ -211,7 +197,7 @@ func (m *Model) ShowHelpScreen(helpTypeInt int, instance interface{}, data inter
 		}
 	}
 
-	m.showHelpScreen(helpType(helpTypeInt), taskPtr, overlayPtr, callback)
+	m.showHelpScreen(helpType, taskPtr, overlayPtr, callback)
 }
 
 // HandleMenuHighlighting handles menu highlighting by calling the internal method
@@ -243,24 +229,4 @@ func (m *Model) KeydownCallback(name string) tea.Cmd {
 		return m.keydownCallback(keyName)
 	}
 	return nil
-}
-
-// GetStorage returns the storage interface
-func (m *Model) GetStorage() *instance.Storage[instanceInterfaces.Instance] {
-	return m.storage
-}
-
-// GetState returns the current state as an int
-func (m *Model) GetState() int {
-	return int(m.state)
-}
-
-// SetState sets the current state from an int
-func (m *Model) SetState(state int) {
-	m.state = tuiState(state)
-}
-
-// GetMenu returns the menu interface
-func (m *Model) GetMenu() *ui.Menu {
-	return m.menu
 }
