@@ -47,6 +47,7 @@ type Controller struct {
 	textOverlay      *overlay.TextOverlay
 }
 
+// NewController creates a new controller
 func NewController(spinner *spinner.Model, autoYes bool) *Controller {
 	return &Controller{
 		list:         ui.NewList(spinner, autoYes),
@@ -54,6 +55,7 @@ func NewController(spinner *spinner.Model, autoYes bool) *Controller {
 	}
 }
 
+// Render returns the rendered UI
 func (c *Controller) Render(model *Model) string {
 	listWithPadding := lipgloss.NewStyle().PaddingTop(1).Render(c.list.String())
 	previewWithPadding := lipgloss.NewStyle().PaddingTop(1).Render(c.tabbedWindow.String())
@@ -81,6 +83,7 @@ func (c *Controller) Render(model *Model) string {
 	return mainView
 }
 
+// Update updates the controller state
 func (c *Controller) Update(model *Model, msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case hideErrMsg:
@@ -115,6 +118,7 @@ func (c *Controller) Update(model *Model, msg tea.Msg) (tea.Model, tea.Cmd) {
 	return model, nil
 }
 
+// handleMetadataUpdate updates the metadata for all instances
 func (c *Controller) handleMetadataUpdate() tea.Cmd {
 	for _, instance := range c.list.GetInstances() {
 		if !instance.Started() || instance.Paused() {
@@ -137,6 +141,7 @@ func (c *Controller) handleMetadataUpdate() tea.Cmd {
 	return tickUpdateMetadataCmd
 }
 
+// handleMouseEvent handles mouse events
 func (c *Controller) handleMouseEvent(model *Model, msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// Handle mouse wheel scrolling in the diff view
 	if c.tabbedWindow.IsInDiffTab() {
@@ -156,6 +161,7 @@ func (c *Controller) handleMouseEvent(model *Model, msg tea.MouseMsg) (tea.Model
 	return model, nil
 }
 
+// handleKeyEvent handles key events
 func (c *Controller) handleKeyEvent(model *Model, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Handle prompt state key events
 	if model.state == tuiStatePrompt && c.textInputOverlay != nil {
@@ -166,6 +172,7 @@ func (c *Controller) handleKeyEvent(model *Model, msg tea.KeyMsg) (tea.Model, te
 	return c.handleKeyPress(model, msg)
 }
 
+// handlePromptKeyEvent handles prompt key events
 func (c *Controller) handlePromptKeyEvent(model *Model, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	shouldClose := c.textInputOverlay.HandleKeyPress(msg)
 	if !shouldClose {
@@ -204,6 +211,7 @@ func (c *Controller) handlePromptKeyEvent(model *Model, msg tea.KeyMsg) (tea.Mod
 	)
 }
 
+// handleKeyPress handles key presses
 func (c *Controller) handleKeyPress(model *Model, msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 	cmd, returnEarly := model.HandleMenuHighlighting(msg)
 	if returnEarly {
@@ -275,18 +283,6 @@ func (c *Controller) handleKeyPress(model *Model, msg tea.KeyMsg) (mod tea.Model
 	default:
 		return model, nil
 	}
-}
-
-// Implementation moved to tasks.go
-
-// GetList returns the list component
-func (c *Controller) GetList() *ui.List {
-	return c.list
-}
-
-// GetTabbedWindow returns the tabbedWindow component
-func (c *Controller) GetTabbedWindow() *ui.TabbedWindow {
-	return c.tabbedWindow
 }
 
 // HandleQuit handles the quit action

@@ -20,6 +20,7 @@ import (
 type tuiState int
 
 const (
+	// tuiStateDefault is the default state
 	tuiStateDefault tuiState = iota
 	// tuiStateNew is the state when the user is creating a new instance.
 	tuiStateNew
@@ -29,6 +30,7 @@ const (
 	tuiStateHelp
 )
 
+// Model represents the application model
 type Model struct {
 	ctx context.Context
 
@@ -65,6 +67,7 @@ type Model struct {
 	controller *Controller
 }
 
+// NewModel creates a new model
 func NewModel(ctx context.Context, program string, autoYes bool) *Model {
 	appConfig := config.LoadConfig()
 	appState := config.LoadState()
@@ -108,6 +111,31 @@ func NewModel(ctx context.Context, program string, autoYes bool) *Model {
 	return h
 }
 
+// Init initializes the model
+func (m *Model) Init() tea.Cmd {
+	// Upon starting, we want to start the spinner. Whenever we get a spinner.TickMsg, we
+	// update the spinner, which sends a new spinner.TickMsg. I think this lasts forever lol.
+	return tea.Batch(
+		m.spinner.Tick,
+	)
+}
+
+// Update updates the model state
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.controller != nil {
+		return m.controller.Update(m, msg)
+	}
+	return m, nil
+}
+
+// handleQuit handles quit events
+func (m *Model) handleQuit() (tea.Model, tea.Cmd) {
+	if m.controller != nil {
+		m.controller.HandleQuit(m)
+	}
+	return m, tea.Quit
+}
+
 // View renders the UI using the controller
 func (m *Model) View() string {
 	return m.controller.Render(m)
@@ -130,31 +158,9 @@ func (m *Model) updateHandleWindowSizeEvent(msg tea.WindowSizeMsg) {
 		listWidth := int(float32(msg.Width) * 0.4)
 		previewWidth := msg.Width - listWidth
 
-		m.controller.GetList().SetSize(listWidth, contentHeight)
-		m.controller.GetTabbedWindow().SetSize(previewWidth, contentHeight)
+		m.controller.list.SetSize(listWidth, contentHeight)
+		m.controller.tabbedWindow.SetSize(previewWidth, contentHeight)
 	}
-}
-
-func (m *Model) Init() tea.Cmd {
-	// Upon starting, we want to start the spinner. Whenever we get a spinner.TickMsg, we
-	// update the spinner, which sends a new spinner.TickMsg. I think this lasts forever lol.
-	return tea.Batch(
-		m.spinner.Tick,
-	)
-}
-
-func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.controller != nil {
-		return m.controller.Update(m, msg)
-	}
-	return m, nil
-}
-
-func (m *Model) handleQuit() (tea.Model, tea.Cmd) {
-	if m.controller != nil {
-		m.controller.HandleQuit(m)
-	}
-	return m, tea.Quit
 }
 
 func (m *Model) handleMenuHighlighting(msg tea.KeyMsg) (cmd tea.Cmd, returnEarly bool) {
