@@ -671,8 +671,10 @@ func (i *Instance) GetWatchdogStatus() (enabled bool, lastActivity time.Time, st
 // ToggleContinuousMode toggles continuous mode for more aggressive monitoring
 func (i *Instance) ToggleContinuousMode() bool {
 	i.ContinuousMode = !i.ContinuousMode
-	log.WarningLog.Printf("continuous mode %s for instance '%s'", 
-		map[bool]string{true: "enabled", false: "disabled"}[i.ContinuousMode], i.Title)
+	if log.WarningLog != nil {
+		log.WarningLog.Printf("continuous mode %s for instance '%s'", 
+			map[bool]string{true: "enabled", false: "disabled"}[i.ContinuousMode], i.Title)
+	}
 	return i.ContinuousMode
 }
 
