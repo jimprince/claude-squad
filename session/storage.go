@@ -28,6 +28,8 @@ type InstanceData struct {
 	ContinuousMode   bool      `json:"continuous_mode"`
 	LastActivityTime time.Time `json:"last_activity_time"`
 	StallCount       int       `json:"stall_count"`
+	RestartAttempts  int       `json:"restart_attempts"`
+	LastRestartTime  time.Time `json:"last_restart_time"`
 }
 
 // GitWorktreeData represents the serializable data of a GitWorktree

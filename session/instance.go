@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -68,6 +67,10 @@ type Instance struct {
 	ContinuousMode bool
 	// LastContentHash tracks content changes to detect stalls
 	lastContentHash string
+	// RestartAttempts tracks how many times we've tried to restart this session
+	RestartAttempts int
+	// LastRestartTime tracks when we last attempted a restart
+	LastRestartTime time.Time
 
 	// The below fields are initialized upon calling Start().
 
@@ -95,6 +98,8 @@ func (i *Instance) ToInstanceData() InstanceData {
 		ContinuousMode: i.ContinuousMode,
 		LastActivityTime: i.LastActivityTime,
 		StallCount: i.StallCount,
+		RestartAttempts: i.RestartAttempts,
+		LastRestartTime: i.LastRestartTime,
 	}
 
 	// Only include worktree data if gitWorktree is initialized
@@ -136,6 +141,8 @@ func FromInstanceData(data InstanceData) (*Instance, error) {
 		ContinuousMode: data.ContinuousMode,
 		LastActivityTime: data.LastActivityTime,
 		StallCount: data.StallCount,
+		RestartAttempts: data.RestartAttempts,
+		LastRestartTime: data.LastRestartTime,
 		gitWorktree: git.NewGitWorktreeFromStorage(
 			data.Worktree.RepoPath,
 			data.Worktree.WorktreePath,
@@ -695,6 +702,20 @@ func (i *Instance) DetectCrashAndRestart() bool {
 		return false
 	}
 
+	// Check if we've tried too many restarts recently
+	const maxRestartAttempts = 3
+	const restartCooldown = 5 * time.Minute
+	
+	if i.RestartAttempts >= maxRestartAttempts {
+		timeSinceLastRestart := time.Since(i.LastRestartTime)
+		if timeSinceLastRestart < restartCooldown {
+			// Too many restart attempts, give up for now
+			return false
+		}
+		// Reset counter after cooldown
+		i.RestartAttempts = 0
+	}
+
 	// Try to capture pane content - if this fails, the session likely crashed
 	_, err := i.tmuxSession.CapturePaneContent()
 	if err != nil {
@@ -703,7 +724,11 @@ func (i *Instance) DetectCrashAndRestart() bool {
 		   strings.Contains(err.Error(), "no session found") ||
 		   strings.Contains(err.Error(), "can't find session") {
 			
-			log.WarningLog.Printf("detected crashed Claude Code session '%s', attempting restart", i.Title)
+			log.WarningLog.Printf("detected crashed Claude Code session '%s' (attempt %d/%d)", 
+				i.Title, i.RestartAttempts+1, maxRestartAttempts)
+			
+			i.RestartAttempts++
+			i.LastRestartTime = time.Now()
 			
 			if err := i.restartClaudeWithResume(); err != nil {
 				log.ErrorLog.Printf("failed to restart Claude Code session '%s': %v", i.Title, err)
@@ -732,7 +757,7 @@ func (i *Instance) restartClaudeWithResume() error {
 
 	// Create resume command with session number
 	baseProgram := strings.Split(i.Program, " ")[0] // Get just "claude" without args
-	resumeProgram := fmt.Sprintf("%s --resume %s", baseProgram, sessionNumber)
+	resumeProgram := fmt.Sprintf("%s -r %s", baseProgram, sessionNumber)
 
 	log.WarningLog.Printf("restarting with command: %s", resumeProgram)
 
@@ -766,30 +791,60 @@ func (i *Instance) restartClaudeWithResume() error {
 
 // findClaudeSessionNumber finds the Claude session number for this workspace
 func (i *Instance) findClaudeSessionNumber() (string, error) {
-	// Run claude --list to get sessions
-	cmd := exec.Command("claude", "--list")
-	cmd.Dir = i.gitWorktree.GetWorktreePath()
-	
-	output, err := cmd.Output()
+	// Claude doesn't have a --list command, so go directly to file-based discovery
+	return i.findClaudeSessionFromFiles()
+}
+
+// findClaudeSessionFromFiles finds Claude session by looking at session files directly
+func (i *Instance) findClaudeSessionFromFiles() (string, error) {
+	// Claude sessions are stored in ~/.claude/projects/
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("failed to list Claude sessions: %w", err)
+		return "", fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	// Parse output to find session for this directory
-	lines := strings.Split(string(output), "\n")
-	currentDir := i.gitWorktree.GetWorktreePath()
+	projectsDir := filepath.Join(homeDir, ".claude", "projects")
 	
-	for _, line := range lines {
-		// Look for lines that contain session info
-		// Format is typically: "session_id  path  summary"
-		if strings.Contains(line, currentDir) {
-			// Extract session ID (first part before whitespace)
-			parts := strings.Fields(line)
-			if len(parts) > 0 {
-				return parts[0], nil
+	// Use the worktree path since Claude was run from there
+	currentDir := i.gitWorktree.GetWorktreePath()
+	// Remove leading slash and replace all / with -
+	dirKey := strings.TrimPrefix(currentDir, "/")
+	dirKey = strings.ReplaceAll(dirKey, "/", "-")
+	
+	// Look for session files in the project directory (not in a sessions subdirectory)
+	sessionDir := filepath.Join(projectsDir, dirKey)
+	
+	log.InfoLog.Printf("looking for sessions in: %s", sessionDir)
+	
+	entries, err := os.ReadDir(sessionDir)
+	if err != nil {
+		log.WarningLog.Printf("failed to read session directory %s: %v", sessionDir, err)
+		return "", fmt.Errorf("failed to read session directory %s: %w", sessionDir, err)
+	}
+
+	// Find the most recent session
+	var mostRecentSession string
+	var mostRecentTime time.Time
+	
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".jsonl") {
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			
+			if info.ModTime().After(mostRecentTime) {
+				mostRecentTime = info.ModTime()
+				// Remove .jsonl extension to get session ID
+				mostRecentSession = strings.TrimSuffix(entry.Name(), ".jsonl")
 			}
 		}
 	}
 
-	return "", fmt.Errorf("no Claude session found for directory %s", currentDir)
+	if mostRecentSession == "" {
+		return "", fmt.Errorf("no Claude session files found in %s", sessionDir)
+	}
+
+	log.InfoLog.Printf("found Claude session from files: %s", mostRecentSession)
+	return mostRecentSession, nil
 }
