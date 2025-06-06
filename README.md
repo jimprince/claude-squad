@@ -7,6 +7,7 @@
 
 ### Highlights
 - Complete tasks in the background (including yolo / auto-accept mode!)
+- **🤖 Intelligent Watchdog**: Automatically detects and recovers from stalled sessions
 - Manage instances and tasks in one terminal window
 - Review changes before applying them, checkout changes before pushing them
 - Each task gets its own isolated git workspace, so no conflicts
@@ -83,6 +84,17 @@ cs
    - Codex: `cs -p "codex"`
    - Aider: `cs -p "aider ..."`
 - Make this the default, by modifying the config file (locate with `cs debug`)
+
+### 🤖 Intelligent Watchdog
+
+Claude Squad includes an intelligent watchdog that automatically monitors your AI sessions and recovers from stalls:
+
+- **Auto-Detection**: Recognizes when sessions are waiting for confirmation or appear frozen
+- **Smart Recovery**: Automatically sends appropriate "continue" commands to unstall sessions
+- **Configurable**: Customize timeout periods, retry attempts, and recovery commands
+- **Non-intrusive**: Only intervenes when sessions are genuinely stalled
+
+The watchdog is enabled by default and can be configured in `~/.claude-squad/config.json`. For detailed configuration options and troubleshooting, see [WATCHDOG.md](WATCHDOG.md).
 
 <br />
 
