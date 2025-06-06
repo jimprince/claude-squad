@@ -13,7 +13,7 @@ import (
 
 const readyIcon = "● "
 const pausedIcon = "⏸ "
-const continuousIcon = "⚡"
+const continuousIcon = "[C]"
 
 var readyStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.AdaptiveColor{Light: "#51bd73", Dark: "#51bd73"})
@@ -146,11 +146,13 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	
 	// Add continuous mode indicator to title if enabled
 	continuousIndicator := ""
+	continuousIndicatorWidth := 0
 	if i.IsContinuousMode() {
 		continuousIndicator = continuousStyle.Render(continuousIcon)
+		continuousIndicatorWidth = len(continuousIcon) + 1 // Account for space
 	}
 	
-	widthAvail := r.width - 3 - len(prefix) - 1 - len(continuousIndicator)
+	widthAvail := r.width - 3 - len(prefix) - 1 - continuousIndicatorWidth
 	if widthAvail > 0 && widthAvail < len(titleText) && len(titleText) >= widthAvail-3 {
 		titleText = titleText[:widthAvail-3] + "..."
 	}
