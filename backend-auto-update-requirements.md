@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y \
 ```dockerfile
 # Replace the COPY cs /usr/local/bin/cs line with:
 WORKDIR /opt
-RUN git clone https://github.com/YOUR_USERNAME/claude-squad.git
+RUN git clone https://github.com/jimprince/claude-squad.git
 WORKDIR /opt/claude-squad
 RUN go build -o cs && \
     cp cs /usr/local/bin/cs && \

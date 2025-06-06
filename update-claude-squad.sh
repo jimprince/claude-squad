@@ -3,7 +3,7 @@
 
 set -e
 
-REPO_URL="https://github.com/your-username/claude-squad.git"
+REPO_URL="https://github.com/jimprince/claude-squad.git"
 BUILD_DIR="/opt/claude-squad"
 BINARY_PATH="/usr/local/bin/cs"
 BACKUP_PATH="/usr/local/bin/cs.backup"
