@@ -22,6 +22,11 @@ type InstanceData struct {
 	Program   string          `json:"program"`
 	Worktree  GitWorktreeData `json:"worktree"`
 	DiffStats DiffStatsData   `json:"diff_stats"`
+	
+	// Watchdog fields
+	WatchdogEnabled  bool      `json:"watchdog_enabled"`
+	LastActivityTime time.Time `json:"last_activity_time"`
+	StallCount       int       `json:"stall_count"`
 }
 
 // GitWorktreeData represents the serializable data of a GitWorktree

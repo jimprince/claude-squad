@@ -31,6 +31,16 @@ type Config struct {
 	DaemonPollInterval int `json:"daemon_poll_interval"`
 	// BranchPrefix is the prefix used for git branches created by the application.
 	BranchPrefix string `json:"branch_prefix"`
+	
+	// Watchdog configuration
+	// WatchdogEnabled determines if watchdog monitoring is enabled by default for new instances
+	WatchdogEnabled bool `json:"watchdog_enabled"`
+	// StallTimeoutSeconds is how long to wait before considering a session stalled (in seconds)
+	StallTimeoutSeconds int `json:"stall_timeout_seconds"`
+	// MaxContinueAttempts is the maximum number of times to attempt recovery before giving up
+	MaxContinueAttempts int `json:"max_continue_attempts"`
+	// ContinueCommands is the list of commands to try when attempting to unstall a session
+	ContinueCommands []string `json:"continue_commands"`
 }
 
 // DefaultConfig returns the default configuration
@@ -47,6 +57,11 @@ func DefaultConfig() *Config {
 			}
 			return fmt.Sprintf("%s/", strings.ToLower(user.Username))
 		}(),
+		// Watchdog defaults
+		WatchdogEnabled:      true,
+		StallTimeoutSeconds:  300, // 5 minutes
+		MaxContinueAttempts:  3,
+		ContinueCommands:     []string{"continue", "yes", "y", "proceed", "\n"},
 	}
 }
 

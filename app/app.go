@@ -217,6 +217,21 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err := instance.UpdateDiffStats(); err != nil {
 				log.WarningLog.Printf("could not update diff stats: %v", err)
 			}
+			
+			// Watchdog functionality
+			if instance.DetectStall(m.appConfig.StallTimeoutSeconds) {
+				enabled, _, stallCount := instance.GetWatchdogStatus()
+				if enabled && stallCount < m.appConfig.MaxContinueAttempts {
+					if err := instance.InjectContinue(m.appConfig.ContinueCommands); err != nil {
+						log.ErrorLog.Printf("watchdog failed to inject continue for instance '%s': %v", 
+							instance.Title, err)
+					}
+				} else if stallCount >= m.appConfig.MaxContinueAttempts {
+					log.WarningLog.Printf("watchdog gave up on instance '%s' after %d attempts", 
+						instance.Title, stallCount)
+					// Optionally pause the instance or take other action
+				}
+			}
 		}
 		return m, tickUpdateMetadataCmd
 	case tea.MouseMsg:
@@ -332,6 +347,9 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 				m.state = stateDefault
 				return m, m.handleError(err)
 			}
+			// Initialize watchdog for new instances
+			instance.InitializeWatchdog(m.appConfig.WatchdogEnabled)
+			
 			// Save after adding new instance
 			if err := m.storage.SaveInstances(m.list.GetInstances()); err != nil {
 				return m, m.handleError(err)
@@ -588,6 +606,8 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		if err := selected.Resume(); err != nil {
 			return m, m.handleError(err)
 		}
+		// Initialize watchdog for resumed instances
+		selected.InitializeWatchdog(m.appConfig.WatchdogEnabled)
 		return m, tea.WindowSize()
 	case keys.KeyEnter:
 		if m.list.NumInstances() == 0 {

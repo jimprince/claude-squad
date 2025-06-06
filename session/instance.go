@@ -6,6 +6,7 @@ import (
 	"claude-squad/session/tmux"
 	"path/filepath"
 
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"strings"
@@ -55,6 +56,16 @@ type Instance struct {
 	// DiffStats stores the current git diff statistics
 	diffStats *git.DiffStats
 
+	// Watchdog functionality
+	// LastActivityTime tracks when the session last had meaningful activity
+	LastActivityTime time.Time
+	// StallCount tracks how many times we've attempted to recover from stalls
+	StallCount int
+	// WatchdogEnabled determines if watchdog monitoring is active for this instance
+	WatchdogEnabled bool
+	// LastContentHash tracks content changes to detect stalls
+	lastContentHash string
+
 	// The below fields are initialized upon calling Start().
 
 	started bool
@@ -77,6 +88,9 @@ func (i *Instance) ToInstanceData() InstanceData {
 		UpdatedAt: time.Now(),
 		Program:   i.Program,
 		AutoYes:   i.AutoYes,
+		WatchdogEnabled: i.WatchdogEnabled,
+		LastActivityTime: i.LastActivityTime,
+		StallCount: i.StallCount,
 	}
 
 	// Only include worktree data if gitWorktree is initialized
@@ -114,6 +128,9 @@ func FromInstanceData(data InstanceData) (*Instance, error) {
 		CreatedAt: data.CreatedAt,
 		UpdatedAt: data.UpdatedAt,
 		Program:   data.Program,
+		WatchdogEnabled: data.WatchdogEnabled,
+		LastActivityTime: data.LastActivityTime,
+		StallCount: data.StallCount,
 		gitWorktree: git.NewGitWorktreeFromStorage(
 			data.Worktree.RepoPath,
 			data.Worktree.WorktreePath,
@@ -212,6 +229,10 @@ func (i *Instance) Start(firstTimeSetup bool) error {
 			}
 		} else {
 			i.started = true
+			// Initialize watchdog for restored instances if enabled
+			if i.WatchdogEnabled {
+				i.InitializeWatchdog(true)
+			}
 		}
 	}()
 
@@ -514,4 +535,125 @@ func (i *Instance) SendPrompt(prompt string) error {
 	}
 
 	return nil
+}
+
+// Watchdog functionality
+
+// DetectStall checks if the session appears to be stalled based on content and timing
+func (i *Instance) DetectStall(stallTimeoutSeconds int) bool {
+	if !i.started || i.Status == Paused || !i.WatchdogEnabled {
+		return false
+	}
+
+	// Get current content
+	content, err := i.tmuxSession.CapturePaneContent()
+	if err != nil {
+		log.WarningLog.Printf("failed to capture pane content for stall detection: %v", err)
+		return false
+	}
+
+	// Check for common stall patterns in Claude Code
+	stallPatterns := []string{
+		"I need confirmation to proceed",
+		"Should I continue?", 
+		"Do you want me to continue?",
+		"Would you like me to proceed?",
+		"Press any key to continue",
+		"Continue? (y/n)",
+		"Proceed? (y/n)",
+		"[y/n]",
+		"(y/n)",
+		"Type 'continue' to proceed",
+		"waiting for confirmation",
+		"Claude Code is waiting",
+	}
+
+	hasStallPattern := false
+	contentLower := strings.ToLower(content)
+	for _, pattern := range stallPatterns {
+		if strings.Contains(contentLower, strings.ToLower(pattern)) {
+			hasStallPattern = true
+			break
+		}
+	}
+
+	// Calculate content hash to detect if content has changed
+	hasher := sha256.New()
+	hasher.Write([]byte(content))
+	currentHash := fmt.Sprintf("%x", hasher.Sum(nil))
+	contentUnchanged := i.lastContentHash == currentHash
+	
+	// Update hash for next check
+	i.lastContentHash = currentHash
+
+	// If content changed, update last activity time
+	if !contentUnchanged {
+		i.LastActivityTime = time.Now()
+		return false
+	}
+
+	// Check if we've been inactive for too long
+	timeSinceActivity := time.Since(i.LastActivityTime)
+	stallTimeout := time.Duration(stallTimeoutSeconds) * time.Second
+	
+	// Only consider it a stall if:
+	// 1. We have a stall pattern in the content, OR
+	// 2. We've had no activity for the configured timeout
+	if hasStallPattern || timeSinceActivity > stallTimeout {
+		log.WarningLog.Printf("stall detected for instance '%s': pattern=%v, inactive_for=%v", 
+			i.Title, hasStallPattern, timeSinceActivity)
+		return true
+	}
+
+	return false
+}
+
+// InjectContinue attempts to send commands to unstall the session
+func (i *Instance) InjectContinue(continueCommands []string) error {
+	if !i.started || i.Status == Paused {
+		return fmt.Errorf("cannot inject continue: instance not running")
+	}
+
+	// Default continue commands if none provided
+	if len(continueCommands) == 0 {
+		continueCommands = []string{
+			"continue",
+			"yes", 
+			"y",
+			"proceed",
+			"\n", // Just press enter
+		}
+	}
+
+	log.WarningLog.Printf("attempting to unstall instance '%s' (attempt %d)", i.Title, i.StallCount+1)
+
+	// Try each continue command
+	for _, cmd := range continueCommands {
+		if err := i.SendPrompt(cmd); err != nil {
+			log.WarningLog.Printf("failed to send continue command '%s': %v", cmd, err)
+			continue
+		}
+		
+		// Increment stall count and update activity time
+		i.StallCount++
+		i.LastActivityTime = time.Now()
+		
+		log.WarningLog.Printf("sent continue command '%s' to instance '%s'", cmd, i.Title)
+		return nil
+	}
+
+	return fmt.Errorf("failed to send any continue commands to instance '%s'", i.Title)
+}
+
+// InitializeWatchdog sets up the watchdog state for a new or resumed instance
+func (i *Instance) InitializeWatchdog(enabled bool) {
+	i.WatchdogEnabled = enabled
+	i.LastActivityTime = time.Now()
+	i.StallCount = 0
+	i.lastContentHash = ""
+}
+
+// GetWatchdogStatus returns current watchdog state information
+func (i *Instance) GetWatchdogStatus() (enabled bool, lastActivity time.Time, stallCount int) {
+	return i.WatchdogEnabled, i.LastActivityTime, i.StallCount
 }
