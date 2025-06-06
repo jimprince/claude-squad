@@ -10,7 +10,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -21,9 +20,9 @@ import (
 const GlobalInstanceLimit = 10
 
 // Run is the main entrypoint into the application.
-func Run(ctx context.Context, program string, autoYes bool, devMode bool) error {
+func Run(ctx context.Context, program string, autoYes bool) error {
 	p := tea.NewProgram(
-		newHome(ctx, program, autoYes, devMode),
+		newHome(ctx, program, autoYes),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(), // Mouse scroll
 	)
@@ -52,7 +51,6 @@ type home struct {
 
 	program string
 	autoYes bool
-	devMode bool
 
 	// storage is the interface for saving/loading data to/from the app's state
 	storage *session.Storage
@@ -95,7 +93,7 @@ type home struct {
 	confirmationOverlay *overlay.ConfirmationOverlay
 }
 
-func newHome(ctx context.Context, program string, autoYes bool, devMode bool) *home {
+func newHome(ctx context.Context, program string, autoYes bool) *home {
 	// Load application config
 	appConfig := config.LoadConfig()
 
@@ -119,7 +117,6 @@ func newHome(ctx context.Context, program string, autoYes bool, devMode bool) *h
 		appConfig:    appConfig,
 		program:      program,
 		autoYes:      autoYes,
-		devMode:      devMode,
 		state:        stateDefault,
 		appState:     appState,
 	}
@@ -141,63 +138,7 @@ func newHome(ctx context.Context, program string, autoYes bool, devMode bool) *h
 		}
 	}
 
-	// Start file watcher if in dev mode
-	if devMode {
-		h.startFileWatcher()
-	}
-
 	return h
-}
-
-// startFileWatcher starts watching Go files for changes in dev mode
-func (h *home) startFileWatcher() {
-	go func() {
-		lastModTime := make(map[string]time.Time)
-		
-		for {
-			select {
-			case <-h.ctx.Done():
-				return
-			default:
-				// Watch for changes in Go files
-				filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
-					if err != nil {
-						return nil
-					}
-					
-					// Only watch .go files
-					if filepath.Ext(path) != ".go" {
-						return nil
-					}
-					
-					// Skip vendor and .git directories
-					if contains(path, "vendor") || contains(path, ".git") {
-						return filepath.SkipDir
-					}
-					
-					modTime := info.ModTime()
-					if lastTime, exists := lastModTime[path]; !exists || modTime.After(lastTime) {
-						lastModTime[path] = modTime
-						if exists { // Don't trigger on first scan
-							// Send refresh message
-							if h.ctx.Err() == nil {
-								log.InfoLog.Printf("file changed: %s", path)
-							}
-						}
-					}
-					
-					return nil
-				})
-				
-				time.Sleep(1 * time.Second) // Check every second
-			}
-		}
-	}()
-}
-
-// Helper function to check if string contains substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && s[:len(substr)] == substr
 }
 
 // updateHandleWindowSizeEvent sets the sizes of the components.
@@ -744,10 +685,6 @@ type previewTickMsg struct{}
 type tickUpdateMetadataMessage struct{}
 
 type instanceChangedMsg struct{}
-
-type fileChangedMsg struct{}
-
-type devRefreshMsg struct{}
 
 // tickUpdateMetadataCmd is the callback to update the metadata of the instances every 500ms. Note that we iterate
 // overall the instances and capture their output. It's a pretty expensive operation. Let's do it 2x a second only.

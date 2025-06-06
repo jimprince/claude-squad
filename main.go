@@ -22,7 +22,6 @@ var (
 	programFlag string
 	autoYesFlag bool
 	daemonFlag  bool
-	devFlag     bool
 	rootCmd     = &cobra.Command{
 		Use:   "claude-squad",
 		Short: "Claude Squad - Manage multiple AI agents like Claude Code, Aider, Codex, and Amp.",
@@ -72,7 +71,7 @@ var (
 				log.ErrorLog.Printf("failed to stop daemon: %v", err)
 			}
 
-			return app.Run(ctx, program, autoYes, devFlag)
+			return app.Run(ctx, program, autoYes)
 		},
 	}
 
@@ -148,7 +147,6 @@ func init() {
 		"[experimental] If enabled, all instances will automatically accept prompts")
 	rootCmd.Flags().BoolVar(&daemonFlag, "daemon", false, "Run a program that loads all sessions"+
 		" and runs autoyes mode on them.")
-	rootCmd.Flags().BoolVar(&devFlag, "dev", false, "Enable development mode with file watching and UI refresh")
 
 	// Hide the daemonFlag as it's only for internal use
 	err := rootCmd.Flags().MarkHidden("daemon")
