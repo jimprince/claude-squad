@@ -13,6 +13,7 @@ import (
 
 const readyIcon = "● "
 const pausedIcon = "⏸ "
+const continuousIcon = "⚡"
 
 var readyStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.AdaptiveColor{Light: "#51bd73", Dark: "#51bd73"})
@@ -25,6 +26,9 @@ var removedLinesStyle = lipgloss.NewStyle().
 
 var pausedStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.AdaptiveColor{Light: "#888888", Dark: "#888888"})
+
+var continuousStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.AdaptiveColor{Light: "#ff9500", Dark: "#ff9500"})
 
 var titleStyle = lipgloss.NewStyle().
 	Padding(1, 1, 0, 1).
@@ -139,13 +143,26 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 
 	// Cut the title if it's too long
 	titleText := i.Title
-	widthAvail := r.width - 3 - len(prefix) - 1
+	
+	// Add continuous mode indicator to title if enabled
+	continuousIndicator := ""
+	if i.IsContinuousMode() {
+		continuousIndicator = continuousStyle.Render(continuousIcon)
+	}
+	
+	widthAvail := r.width - 3 - len(prefix) - 1 - len(continuousIndicator)
 	if widthAvail > 0 && widthAvail < len(titleText) && len(titleText) >= widthAvail-3 {
 		titleText = titleText[:widthAvail-3] + "..."
 	}
+	
+	titleWithIndicator := fmt.Sprintf("%s %s", prefix, titleText)
+	if continuousIndicator != "" {
+		titleWithIndicator = fmt.Sprintf("%s %s %s", prefix, titleText, continuousIndicator)
+	}
+	
 	title := titleS.Render(lipgloss.JoinHorizontal(
 		lipgloss.Left,
-		lipgloss.Place(r.width-3, 1, lipgloss.Left, lipgloss.Center, fmt.Sprintf("%s %s", prefix, titleText)),
+		lipgloss.Place(r.width-3, 1, lipgloss.Left, lipgloss.Center, titleWithIndicator),
 		" ",
 		join,
 	))
