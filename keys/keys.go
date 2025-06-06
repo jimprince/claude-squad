@@ -23,6 +23,7 @@ const (
 	KeyCheckout
 	KeyResume
 	KeyPrompt // New key for entering a prompt
+	KeyResumeSelect // Key for selecting a session to resume
 	KeyHelp   // Key for showing help screen
 	KeyContinuousMode // Key for toggling continuous mode
 
@@ -44,6 +45,7 @@ var GlobalKeyStringsMap = map[string]KeyName{
 	"option+up":  KeyShiftUp,
 	"option+down": KeyShiftDown,
 	"N":          KeyPrompt,
+	"shift+n":    KeyResumeSelect,
 	"enter":      KeyEnter,
 	"o":          KeyEnter,
 	"n":          KeyNew,

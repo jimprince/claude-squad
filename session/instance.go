@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -681,4 +682,99 @@ func (i *Instance) ToggleContinuousMode() bool {
 // IsContinuousMode returns whether continuous mode is enabled
 func (i *Instance) IsContinuousMode() bool {
 	return i.ContinuousMode
+}
+
+// DetectCrashAndRestart detects if Claude Code crashed and restarts it with --resume
+func (i *Instance) DetectCrashAndRestart() bool {
+	if !i.started || i.Status == Paused {
+		return false
+	}
+
+	// Only handle Claude Code crashes
+	if !strings.Contains(strings.ToLower(i.Program), "claude") {
+		return false
+	}
+
+	// Try to capture pane content - if this fails, the session likely crashed
+	_, err := i.tmuxSession.CapturePaneContent()
+	if err != nil {
+		// Check if it's an exit status 1 error (session crashed)
+		if strings.Contains(err.Error(), "exit status 1") || 
+		   strings.Contains(err.Error(), "no session found") ||
+		   strings.Contains(err.Error(), "can't find session") {
+			
+			log.WarningLog.Printf("detected crashed Claude Code session '%s', attempting restart", i.Title)
+			
+			if err := i.restartClaudeWithResume(); err != nil {
+				log.ErrorLog.Printf("failed to restart Claude Code session '%s': %v", i.Title, err)
+				return false
+			}
+			return true
+		}
+	}
+	return false
+}
+
+// restartClaudeWithResume restarts Claude Code with --resume and the session ID
+func (i *Instance) restartClaudeWithResume() error {
+	// First, get the Claude session list to find the session number
+	sessionNumber, err := i.findClaudeSessionNumber()
+	if err != nil {
+		return fmt.Errorf("failed to find Claude session number: %w", err)
+	}
+
+	// Kill the existing tmux session if it's still running
+	if i.tmuxSession != nil {
+		if err := i.tmuxSession.Close(); err != nil {
+			log.ErrorLog.Printf("failed to close tmux session during restart: %v", err)
+		}
+	}
+
+	// Create resume command with session number
+	baseProgram := strings.Split(i.Program, " ")[0] // Get just "claude" without args
+	resumeProgram := fmt.Sprintf("%s --resume %s", baseProgram, sessionNumber)
+
+	log.WarningLog.Printf("restarting with command: %s", resumeProgram)
+
+	// Create new tmux session with resume command
+	tmuxSession := tmux.NewTmuxSession(i.Title, resumeProgram)
+	i.tmuxSession = tmuxSession
+
+	// Start the new session in the existing worktree
+	if err := i.tmuxSession.Start(i.gitWorktree.GetWorktreePath()); err != nil {
+		return fmt.Errorf("failed to restart Claude Code with --resume: %w", err)
+	}
+
+	log.WarningLog.Printf("successfully restarted Claude Code session '%s' with session %s", i.Title, sessionNumber)
+	return nil
+}
+
+// findClaudeSessionNumber finds the Claude session number for this workspace
+func (i *Instance) findClaudeSessionNumber() (string, error) {
+	// Run claude --list to get sessions
+	cmd := exec.Command("claude", "--list")
+	cmd.Dir = i.gitWorktree.GetWorktreePath()
+	
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to list Claude sessions: %w", err)
+	}
+
+	// Parse output to find session for this directory
+	lines := strings.Split(string(output), "\n")
+	currentDir := i.gitWorktree.GetWorktreePath()
+	
+	for _, line := range lines {
+		// Look for lines that contain session info
+		// Format is typically: "session_id  path  summary"
+		if strings.Contains(line, currentDir) {
+			// Extract session ID (first part before whitespace)
+			parts := strings.Fields(line)
+			if len(parts) > 0 {
+				return parts[0], nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no Claude session found for directory %s", currentDir)
 }

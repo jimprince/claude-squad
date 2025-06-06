@@ -218,6 +218,12 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				log.WarningLog.Printf("could not update diff stats: %v", err)
 			}
 			
+			// Crash detection and auto-restart
+			if instance.DetectCrashAndRestart() {
+				// Session was restarted, skip other checks this cycle
+				continue
+			}
+			
 			// Watchdog functionality
 			if instance.DetectStall(m.appConfig.StallTimeoutSeconds, m.appConfig.ContinuousModeTimeoutSeconds) {
 				enabled, _, stallCount := instance.GetWatchdogStatus()
