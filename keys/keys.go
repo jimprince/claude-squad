@@ -39,6 +39,10 @@ var GlobalKeyStringsMap = map[string]KeyName{
 	"j":          KeyDown,
 	"shift+up":   KeyShiftUp,
 	"shift+down": KeyShiftDown,
+	"alt+up":     KeyShiftUp,
+	"alt+down":   KeyShiftDown,
+	"option+up":  KeyShiftUp,
+	"option+down": KeyShiftDown,
 	"N":          KeyPrompt,
 	"enter":      KeyEnter,
 	"o":          KeyEnter,
@@ -64,12 +68,12 @@ var GlobalkeyBindings = map[KeyName]key.Binding{
 		key.WithHelp("↓/j", "down"),
 	),
 	KeyShiftUp: key.NewBinding(
-		key.WithKeys("shift+up"),
-		key.WithHelp("shift+↑", "scroll"),
+		key.WithKeys("shift+up", "alt+up", "option+up"),
+		key.WithHelp("shift+↑/opt+↑", "scroll"),
 	),
 	KeyShiftDown: key.NewBinding(
-		key.WithKeys("shift+down"),
-		key.WithHelp("shift+↓", "scroll"),
+		key.WithKeys("shift+down", "alt+down", "option+down"),
+		key.WithHelp("shift+↓/opt+↓", "scroll"),
 	),
 	KeyEnter: key.NewBinding(
 		key.WithKeys("enter", "o"),
