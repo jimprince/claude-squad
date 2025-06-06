@@ -63,6 +63,8 @@ type Instance struct {
 	StallCount int
 	// WatchdogEnabled determines if watchdog monitoring is active for this instance
 	WatchdogEnabled bool
+	// ContinuousMode enables more aggressive watchdog monitoring
+	ContinuousMode bool
 	// LastContentHash tracks content changes to detect stalls
 	lastContentHash string
 
@@ -89,6 +91,7 @@ func (i *Instance) ToInstanceData() InstanceData {
 		Program:   i.Program,
 		AutoYes:   i.AutoYes,
 		WatchdogEnabled: i.WatchdogEnabled,
+		ContinuousMode: i.ContinuousMode,
 		LastActivityTime: i.LastActivityTime,
 		StallCount: i.StallCount,
 	}
@@ -129,6 +132,7 @@ func FromInstanceData(data InstanceData) (*Instance, error) {
 		UpdatedAt: data.UpdatedAt,
 		Program:   data.Program,
 		WatchdogEnabled: data.WatchdogEnabled,
+		ContinuousMode: data.ContinuousMode,
 		LastActivityTime: data.LastActivityTime,
 		StallCount: data.StallCount,
 		gitWorktree: git.NewGitWorktreeFromStorage(
@@ -540,7 +544,7 @@ func (i *Instance) SendPrompt(prompt string) error {
 // Watchdog functionality
 
 // DetectStall checks if the session appears to be stalled based on content and timing
-func (i *Instance) DetectStall(stallTimeoutSeconds int) bool {
+func (i *Instance) DetectStall(stallTimeoutSeconds, continuousModeTimeoutSeconds int) bool {
 	if !i.started || i.Status == Paused || !i.WatchdogEnabled {
 		return false
 	}
@@ -594,7 +598,13 @@ func (i *Instance) DetectStall(stallTimeoutSeconds int) bool {
 
 	// Check if we've been inactive for too long
 	timeSinceActivity := time.Since(i.LastActivityTime)
-	stallTimeout := time.Duration(stallTimeoutSeconds) * time.Second
+	
+	// Use continuous mode timeout if enabled, otherwise use normal timeout
+	timeoutSeconds := stallTimeoutSeconds
+	if i.ContinuousMode {
+		timeoutSeconds = continuousModeTimeoutSeconds
+	}
+	stallTimeout := time.Duration(timeoutSeconds) * time.Second
 	
 	// Only consider it a stall if:
 	// 1. We have a stall pattern in the content, OR
@@ -656,4 +666,17 @@ func (i *Instance) InitializeWatchdog(enabled bool) {
 // GetWatchdogStatus returns current watchdog state information
 func (i *Instance) GetWatchdogStatus() (enabled bool, lastActivity time.Time, stallCount int) {
 	return i.WatchdogEnabled, i.LastActivityTime, i.StallCount
+}
+
+// ToggleContinuousMode toggles continuous mode for more aggressive monitoring
+func (i *Instance) ToggleContinuousMode() bool {
+	i.ContinuousMode = !i.ContinuousMode
+	log.WarningLog.Printf("continuous mode %s for instance '%s'", 
+		map[bool]string{true: "enabled", false: "disabled"}[i.ContinuousMode], i.Title)
+	return i.ContinuousMode
+}
+
+// IsContinuousMode returns whether continuous mode is enabled
+func (i *Instance) IsContinuousMode() bool {
+	return i.ContinuousMode
 }

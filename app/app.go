@@ -219,7 +219,7 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			
 			// Watchdog functionality
-			if instance.DetectStall(m.appConfig.StallTimeoutSeconds) {
+			if instance.DetectStall(m.appConfig.StallTimeoutSeconds, m.appConfig.ContinuousModeTimeoutSeconds) {
 				enabled, _, stallCount := instance.GetWatchdogStatus()
 				if enabled && stallCount < m.appConfig.MaxContinueAttempts {
 					if err := instance.InjectContinue(m.appConfig.ContinueCommands); err != nil {
@@ -464,6 +464,17 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 	switch name {
 	case keys.KeyHelp:
 		return m.showHelpScreen(helpTypeGeneral, nil)
+	case keys.KeyContinuousMode:
+		selected := m.list.GetSelectedInstance()
+		if selected == nil {
+			return m, nil
+		}
+		continuousMode := selected.ToggleContinuousMode()
+		modeText := "disabled"
+		if continuousMode {
+			modeText = "enabled (30s timeout)"
+		}
+		return m, m.handleError(fmt.Errorf("continuous mode %s for '%s'", modeText, selected.Title))
 	case keys.KeyPrompt:
 		if m.list.NumInstances() >= GlobalInstanceLimit {
 			return m, m.handleError(

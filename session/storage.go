@@ -25,6 +25,7 @@ type InstanceData struct {
 	
 	// Watchdog fields
 	WatchdogEnabled  bool      `json:"watchdog_enabled"`
+	ContinuousMode   bool      `json:"continuous_mode"`
 	LastActivityTime time.Time `json:"last_activity_time"`
 	StallCount       int       `json:"stall_count"`
 }

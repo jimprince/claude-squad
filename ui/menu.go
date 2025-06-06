@@ -138,7 +138,7 @@ func (m *Menu) addInstanceOptions() {
 	}
 
 	// System group
-	systemGroup := []keys.KeyName{keys.KeyTab, keys.KeyHelp, keys.KeyQuit}
+	systemGroup := []keys.KeyName{keys.KeyTab, keys.KeyContinuousMode, keys.KeyHelp, keys.KeyQuit}
 
 	// Combine all groups
 	options = append(options, actionGroup...)
@@ -163,7 +163,7 @@ func (m *Menu) String() string {
 	}{
 		{0, 2}, // Instance management group (n, d)
 		{2, 5}, // Action group (enter, submit, pause/resume)
-		{6, 8}, // System group (tab, help, q)
+		{6, 10}, // System group (tab, ctrl+g, help, q)
 	}
 
 	for i, k := range m.options {

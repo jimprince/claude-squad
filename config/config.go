@@ -41,6 +41,8 @@ type Config struct {
 	MaxContinueAttempts int `json:"max_continue_attempts"`
 	// ContinueCommands is the list of commands to try when attempting to unstall a session
 	ContinueCommands []string `json:"continue_commands"`
+	// ContinuousModeTimeoutSeconds is the more aggressive timeout for continuous mode (in seconds)
+	ContinuousModeTimeoutSeconds int `json:"continuous_mode_timeout_seconds"`
 }
 
 // DefaultConfig returns the default configuration
@@ -58,10 +60,11 @@ func DefaultConfig() *Config {
 			return fmt.Sprintf("%s/", strings.ToLower(user.Username))
 		}(),
 		// Watchdog defaults
-		WatchdogEnabled:      true,
-		StallTimeoutSeconds:  300, // 5 minutes
-		MaxContinueAttempts:  3,
-		ContinueCommands:     []string{"continue", "yes", "y", "proceed", "\n"},
+		WatchdogEnabled:               true,
+		StallTimeoutSeconds:           300, // 5 minutes
+		MaxContinueAttempts:           3,
+		ContinueCommands:              []string{"continue", "yes", "y", "proceed", "\n"},
+		ContinuousModeTimeoutSeconds:  30, // 30 seconds for continuous mode
 	}
 }
 
