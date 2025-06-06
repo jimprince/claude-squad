@@ -746,6 +746,21 @@ func (i *Instance) restartClaudeWithResume() error {
 	}
 
 	log.WarningLog.Printf("successfully restarted Claude Code session '%s' with session %s", i.Title, sessionNumber)
+	
+	// Claude needs a "continue" command after resuming to actually start working
+	time.Sleep(2 * time.Second) // Give Claude time to load the session
+	
+	if err := i.SendPrompt("continue"); err != nil {
+		log.ErrorLog.Printf("failed to send initial continue after restart: %v", err)
+		// Don't fail the restart, just log the error
+	} else {
+		log.InfoLog.Printf("sent initial 'continue' to resumed session '%s'", i.Title)
+	}
+	
+	// Reset activity tracking for fresh monitoring
+	i.LastActivityTime = time.Now()
+	i.lastContentHash = ""
+	
 	return nil
 }
 
