@@ -472,7 +472,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		continuousMode := selected.ToggleContinuousMode()
 		modeText := "disabled"
 		if continuousMode {
-			modeText = "enabled (30s timeout)"
+			modeText = "enabled (8s timeout)"
 		}
 		return m, m.handleError(fmt.Errorf("continuous mode %s for '%s'", modeText, selected.Title))
 	case keys.KeyPrompt:

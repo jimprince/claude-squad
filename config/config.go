@@ -64,7 +64,7 @@ func DefaultConfig() *Config {
 		StallTimeoutSeconds:           300, // 5 minutes
 		MaxContinueAttempts:           3,
 		ContinueCommands:              []string{"continue", "yes", "y", "proceed", "\n"},
-		ContinuousModeTimeoutSeconds:  30, // 30 seconds for continuous mode
+		ContinuousModeTimeoutSeconds:  8, // 8 seconds for continuous mode
 	}
 }
 
