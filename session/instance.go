@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -578,21 +579,97 @@ func (i *Instance) DetectStall(stallTimeoutSeconds, continuousModeTimeoutSeconds
 		"Type 'continue' to proceed",
 		"waiting for confirmation",
 		"Claude Code is waiting",
+		"Do you want to proceed?",
+		"1. Yes",
+		"> 1. Yes",
+	}
+
+	// Claude Code specific completion patterns
+	completionPatterns := []string{
+		"What's Working Now:",
+		"The medical dictation app now has all essential features implemented",
+		"all essential features implemented and working",
+		"auto-accept edits on",
+		"Context left until auto-compact:",
+		"All UI elements functional and responsive",
+		"Settings management implemented",
+		"workflow complete",
 	}
 
 	hasStallPattern := false
+	hasCompletionPattern := false
 	contentLower := strings.ToLower(content)
+	
+	// First check explicit patterns
 	for _, pattern := range stallPatterns {
 		if strings.Contains(contentLower, strings.ToLower(pattern)) {
 			hasStallPattern = true
 			break
 		}
 	}
+	
+	// Check for completion patterns (Claude Code specific)
+	for _, pattern := range completionPatterns {
+		if strings.Contains(contentLower, strings.ToLower(pattern)) {
+			hasCompletionPattern = true
+			break
+		}
+	}
+	
+	// Also check for common confirmation prompt structures
+	if !hasStallPattern {
+		// Check for "Do you want to [action]?" pattern
+		if strings.Contains(contentLower, "do you want to") && strings.Contains(contentLower, "?") {
+			hasStallPattern = true
+		}
+		// Check for numbered options with Yes/No
+		if strings.Contains(contentLower, "1.") && strings.Contains(contentLower, "yes") &&
+		   strings.Contains(contentLower, "2.") && strings.Contains(contentLower, "no") {
+			hasStallPattern = true
+		}
+		// Check for (y/n) or similar patterns anywhere in content
+		if strings.Contains(contentLower, "(y/n)") || strings.Contains(contentLower, "(yes/no)") ||
+		   strings.Contains(contentLower, "[y/n]") || strings.Contains(contentLower, "(esc)") {
+			hasStallPattern = true
+		}
+		// Check for the terminal prompt at the bottom
+		if strings.Contains(content, "\n> ") || strings.HasSuffix(strings.TrimSpace(content), ">") {
+			hasStallPattern = true
+		}
+	}
 
+	// For continuous mode, use different detection logic
+	if i.ContinuousMode {
+		// In continuous mode, we care more about completion patterns and prompts
+		if hasCompletionPattern || hasStallPattern {
+			// Check if we've been in this state for at least 2 seconds
+			timeSinceActivity := time.Since(i.LastActivityTime)
+			stabilityThreshold := 2 * time.Second
+			
+			// Use normalized content for comparison (strip timestamps and dynamic elements)
+			normalizedContent := i.normalizeContent(content)
+			normalizedHash := i.hashContent(normalizedContent)
+			
+			// If normalized content hasn't changed for stability threshold, it's a stall
+			if i.lastContentHash == normalizedHash && timeSinceActivity > stabilityThreshold {
+				log.WarningLog.Printf("continuous mode stall detected for instance '%s': completion_pattern=%v, stall_pattern=%v, stable_for=%v", 
+					i.Title, hasCompletionPattern, hasStallPattern, timeSinceActivity)
+				return true
+			}
+			
+			// Update hash if it changed
+			if i.lastContentHash != normalizedHash {
+				i.lastContentHash = normalizedHash
+				i.LastActivityTime = time.Now()
+			}
+			
+			return false
+		}
+	}
+
+	// Regular mode detection (unchanged logic for backward compatibility)
 	// Calculate content hash to detect if content has changed
-	hasher := sha256.New()
-	hasher.Write([]byte(content))
-	currentHash := fmt.Sprintf("%x", hasher.Sum(nil))
+	currentHash := i.hashContent(content)
 	contentUnchanged := i.lastContentHash == currentHash
 	
 	// Update hash for next check
@@ -626,6 +703,34 @@ func (i *Instance) DetectStall(stallTimeoutSeconds, continuousModeTimeoutSeconds
 	return false
 }
 
+// normalizeContent strips out dynamic elements like timestamps and cursor positions
+func (i *Instance) normalizeContent(content string) string {
+	// Remove ANSI escape codes (colors, cursor movements, etc)
+	ansiRegex := regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+	normalized := ansiRegex.ReplaceAllString(content, "")
+	
+	// Remove timestamp patterns (common formats)
+	// Example: 13:54:48, 2024-01-15, etc.
+	timeRegex := regexp.MustCompile(`\d{1,2}:\d{2}:\d{2}|\d{4}-\d{2}-\d{2}`)
+	normalized = timeRegex.ReplaceAllString(normalized, "")
+	
+	// Remove percentage patterns that might change (like "28%")
+	percentRegex := regexp.MustCompile(`\d+%`)
+	normalized = percentRegex.ReplaceAllString(normalized, "")
+	
+	// Normalize whitespace
+	normalized = strings.TrimSpace(normalized)
+	
+	return normalized
+}
+
+// hashContent creates a hash of the content
+func (i *Instance) hashContent(content string) string {
+	hasher := sha256.New()
+	hasher.Write([]byte(content))
+	return fmt.Sprintf("%x", hasher.Sum(nil))
+}
+
 // InjectContinue attempts to send commands to unstall the session
 func (i *Instance) InjectContinue(continueCommands []string) error {
 	if !i.started || i.Status == Paused {
@@ -635,6 +740,7 @@ func (i *Instance) InjectContinue(continueCommands []string) error {
 	// Default continue commands if none provided
 	if len(continueCommands) == 0 {
 		continueCommands = []string{
+			"1",      // For numbered prompts
 			"continue",
 			"yes", 
 			"y",
@@ -644,6 +750,36 @@ func (i *Instance) InjectContinue(continueCommands []string) error {
 	}
 
 	log.WarningLog.Printf("attempting to unstall instance '%s' (attempt %d)", i.Title, i.StallCount+1)
+
+	// Get current content to make intelligent decision
+	content, err := i.tmuxSession.CapturePaneContent()
+	if err == nil {
+		contentLower := strings.ToLower(content)
+		
+		// Special handling for continuous mode with Claude Code
+		if i.ContinuousMode {
+			// If Claude Code is showing completion status, just send continue
+			if strings.Contains(contentLower, "what's working now:") ||
+			   strings.Contains(contentLower, "all essential features implemented") ||
+			   strings.Contains(contentLower, "auto-accept edits on") {
+				continueCommands = []string{"continue", "\n"}
+				log.InfoLog.Printf("continuous mode: detected Claude Code completion state, sending 'continue'")
+			}
+		}
+		
+		// If there's a "don't ask again" option, prefer that
+		if strings.Contains(contentLower, "don't ask again") {
+			// Usually option 2 for "don't ask again"
+			if strings.Contains(contentLower, "2.") && strings.Contains(contentLower, "don't ask again") {
+				continueCommands = []string{"2", "yes", "1", "y", "continue"}
+			}
+		}
+		
+		// If it's asking to create a file, might want to say yes
+		if strings.Contains(contentLower, "do you want to create") {
+			continueCommands = []string{"1", "yes", "y"}
+		}
+	}
 
 	// Try each continue command
 	for _, cmd := range continueCommands {
