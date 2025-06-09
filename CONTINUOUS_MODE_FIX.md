@@ -1,4 +1,4 @@
-# Continuous Mode Fix Summary
+# Continuous Mode Fix & Enhancement Summary
 
 ## Problem
 Continuous mode was not working because:
@@ -46,10 +46,37 @@ Updated the stall detection in `session/instance.go`:
 
 3. Dynamic UI elements (timestamps, cursor) are filtered out to prevent false negatives
 
+## Latest Enhancement: Informative Continue Messages
+
+### What's New
+1. **Sends `/continuous` command** - When auto-continuing, the system now sends the `/continuous` slash command to Claude Code
+2. **Time remaining information** - Shows how much time is left in continuous mode
+3. **Duration tracking** - Tracks when continuous mode was enabled and can have an optional duration
+4. **Automatic expiration** - Continuous mode can automatically disable after a set duration
+
+### How Continue Messages Work
+When Claude Code completes a task and shows "What's Working Now:", the system sends:
+- For indefinite mode: `/continuous You're in continuous mode (indefinite duration). Keep working on any remaining tasks or improvements. The system will auto-continue when you complete each task.`
+- For timed mode: `/continuous You're in continuous mode. Time remaining: 5m 30s. Keep working on any remaining tasks or improvements.`
+
+This lets Claude Code know:
+- It's operating in continuous mode
+- How much time is remaining (if applicable)
+- It should continue with any remaining work
+
 ## Testing
 To test the fix:
 1. Run claude-squad
 2. Start a Claude Code session
 3. Press Ctrl+G to enable continuous mode
 4. Let Claude complete a task
-5. When it shows "What's Working Now:" with a task list, it should auto-continue after 2 seconds
+5. When it shows "What's Working Now:" with a task list, it should:
+   - Wait 2 seconds for stability
+   - Send the `/continuous` command with time info
+   - Auto-continue working
+
+## Future Enhancements
+The system now supports setting a duration for continuous mode (e.g., "run for 2 hours"), though the UI for this isn't implemented yet. The backend is ready to handle:
+- `SetContinuousModeDuration(duration)` - Set how long continuous mode should run
+- Automatic expiration when time runs out
+- Clear time remaining display in continue messages

@@ -66,6 +66,10 @@ type Instance struct {
 	WatchdogEnabled bool
 	// ContinuousMode enables more aggressive watchdog monitoring
 	ContinuousMode bool
+	// ContinuousModeStartTime tracks when continuous mode was enabled
+	ContinuousModeStartTime time.Time
+	// ContinuousModeDuration is how long continuous mode should run (0 = indefinite)
+	ContinuousModeDuration time.Duration
 	// LastContentHash tracks content changes to detect stalls
 	lastContentHash string
 	// RestartAttempts tracks how many times we've tried to restart this session
@@ -97,6 +101,8 @@ func (i *Instance) ToInstanceData() InstanceData {
 		AutoYes:   i.AutoYes,
 		WatchdogEnabled: i.WatchdogEnabled,
 		ContinuousMode: i.ContinuousMode,
+		ContinuousModeStartTime: i.ContinuousModeStartTime,
+		ContinuousModeDuration: i.ContinuousModeDuration,
 		LastActivityTime: i.LastActivityTime,
 		StallCount: i.StallCount,
 		RestartAttempts: i.RestartAttempts,
@@ -140,6 +146,8 @@ func FromInstanceData(data InstanceData) (*Instance, error) {
 		Program:   data.Program,
 		WatchdogEnabled: data.WatchdogEnabled,
 		ContinuousMode: data.ContinuousMode,
+		ContinuousModeStartTime: data.ContinuousModeStartTime,
+		ContinuousModeDuration: data.ContinuousModeDuration,
 		LastActivityTime: data.LastActivityTime,
 		StallCount: data.StallCount,
 		RestartAttempts: data.RestartAttempts,
@@ -758,12 +766,32 @@ func (i *Instance) InjectContinue(continueCommands []string) error {
 		
 		// Special handling for continuous mode with Claude Code
 		if i.ContinuousMode {
-			// If Claude Code is showing completion status, just send continue
+			// If Claude Code is showing completion status, send /continuous command
 			if strings.Contains(contentLower, "what's working now:") ||
 			   strings.Contains(contentLower, "all essential features implemented") ||
 			   strings.Contains(contentLower, "auto-accept edits on") {
-				continueCommands = []string{"continue", "\n"}
-				log.InfoLog.Printf("continuous mode: detected Claude Code completion state, sending 'continue'")
+				// Build the continuous mode message
+				var continuousMsg string
+				remaining := i.GetContinuousModeTimeRemaining()
+				if remaining > 0 {
+					// Format remaining time nicely
+					hours := int(remaining.Hours())
+					minutes := int(remaining.Minutes()) % 60
+					seconds := int(remaining.Seconds()) % 60
+					
+					if hours > 0 {
+						continuousMsg = fmt.Sprintf("/continuous You're in continuous mode. Time remaining: %dh %dm %ds. Keep working on any remaining tasks or improvements.", hours, minutes, seconds)
+					} else if minutes > 0 {
+						continuousMsg = fmt.Sprintf("/continuous You're in continuous mode. Time remaining: %dm %ds. Keep working on any remaining tasks or improvements.", minutes, seconds)
+					} else {
+						continuousMsg = fmt.Sprintf("/continuous You're in continuous mode. Time remaining: %ds. Keep working on any remaining tasks or improvements.", seconds)
+					}
+				} else {
+					continuousMsg = "/continuous You're in continuous mode (indefinite duration). Keep working on any remaining tasks or improvements. The system will auto-continue when you complete each task."
+				}
+				
+				continueCommands = []string{continuousMsg, "continue", "\n"}
+				log.InfoLog.Printf("continuous mode: detected Claude Code completion state, sending continuous mode message")
 			}
 		}
 		
@@ -815,6 +843,16 @@ func (i *Instance) GetWatchdogStatus() (enabled bool, lastActivity time.Time, st
 // ToggleContinuousMode toggles continuous mode for more aggressive monitoring
 func (i *Instance) ToggleContinuousMode() bool {
 	i.ContinuousMode = !i.ContinuousMode
+	if i.ContinuousMode {
+		i.ContinuousModeStartTime = time.Now()
+		// Set default duration if not specified (0 = indefinite)
+		if i.ContinuousModeDuration == 0 {
+			i.ContinuousModeDuration = 0 // Run indefinitely
+		}
+	} else {
+		// Clear the start time when disabling
+		i.ContinuousModeStartTime = time.Time{}
+	}
 	if log.WarningLog != nil {
 		log.WarningLog.Printf("continuous mode %s for instance '%s'", 
 			map[bool]string{true: "enabled", false: "disabled"}[i.ContinuousMode], i.Title)
@@ -822,9 +860,34 @@ func (i *Instance) ToggleContinuousMode() bool {
 	return i.ContinuousMode
 }
 
+// SetContinuousModeDuration sets the duration for continuous mode
+func (i *Instance) SetContinuousModeDuration(duration time.Duration) {
+	i.ContinuousModeDuration = duration
+	if i.ContinuousMode {
+		// Reset start time when duration changes
+		i.ContinuousModeStartTime = time.Now()
+	}
+}
+
 // IsContinuousMode returns whether continuous mode is enabled
 func (i *Instance) IsContinuousMode() bool {
 	return i.ContinuousMode
+}
+
+// GetContinuousModeTimeRemaining returns the time remaining in continuous mode
+// Returns 0 if continuous mode is indefinite or not enabled
+func (i *Instance) GetContinuousModeTimeRemaining() time.Duration {
+	if !i.ContinuousMode || i.ContinuousModeDuration == 0 {
+		return 0
+	}
+	
+	elapsed := time.Since(i.ContinuousModeStartTime)
+	remaining := i.ContinuousModeDuration - elapsed
+	
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
 }
 
 // DetectCrashAndRestart detects if Claude Code crashed and restarts it with --resume

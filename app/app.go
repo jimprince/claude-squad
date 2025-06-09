@@ -224,6 +224,16 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				continue
 			}
 			
+			// Check if continuous mode has expired
+			if instance.IsContinuousMode() && instance.ContinuousModeDuration > 0 {
+				remaining := instance.GetContinuousModeTimeRemaining()
+				if remaining <= 0 {
+					// Continuous mode has expired, disable it
+					instance.ContinuousMode = false
+					log.InfoLog.Printf("continuous mode expired for instance '%s'", instance.Title)
+				}
+			}
+			
 			// Watchdog functionality
 			if instance.DetectStall(m.appConfig.StallTimeoutSeconds, m.appConfig.ContinuousModeTimeoutSeconds) {
 				enabled, _, stallCount := instance.GetWatchdogStatus()

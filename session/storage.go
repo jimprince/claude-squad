@@ -24,12 +24,14 @@ type InstanceData struct {
 	DiffStats DiffStatsData   `json:"diff_stats"`
 	
 	// Watchdog fields
-	WatchdogEnabled  bool      `json:"watchdog_enabled"`
-	ContinuousMode   bool      `json:"continuous_mode"`
-	LastActivityTime time.Time `json:"last_activity_time"`
-	StallCount       int       `json:"stall_count"`
-	RestartAttempts  int       `json:"restart_attempts"`
-	LastRestartTime  time.Time `json:"last_restart_time"`
+	WatchdogEnabled         bool          `json:"watchdog_enabled"`
+	ContinuousMode          bool          `json:"continuous_mode"`
+	ContinuousModeStartTime time.Time     `json:"continuous_mode_start_time"`
+	ContinuousModeDuration  time.Duration `json:"continuous_mode_duration"`
+	LastActivityTime        time.Time     `json:"last_activity_time"`
+	StallCount              int           `json:"stall_count"`
+	RestartAttempts         int           `json:"restart_attempts"`
+	LastRestartTime         time.Time     `json:"last_restart_time"`
 }
 
 // GitWorktreeData represents the serializable data of a GitWorktree
