@@ -11,6 +11,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -31,6 +32,9 @@ const (
 
 // Instance is a running instance of claude code.
 type Instance struct {
+	// Mutex for thread-safe access to continuous mode fields
+	mu sync.RWMutex
+	
 	// Title is the title of the instance.
 	Title string
 	// Path is the path to the workspace.
@@ -76,6 +80,9 @@ type Instance struct {
 	RestartAttempts int
 	// LastRestartTime tracks when we last attempted a restart
 	LastRestartTime time.Time
+	// Cache for formatted duration string
+	cachedDurationString string
+	cachedDurationTime   time.Time
 
 	// The below fields are initialized upon calling Start().
 
@@ -842,6 +849,9 @@ func (i *Instance) GetWatchdogStatus() (enabled bool, lastActivity time.Time, st
 
 // ToggleContinuousMode toggles continuous mode for more aggressive monitoring
 func (i *Instance) ToggleContinuousMode() bool {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	
 	i.ContinuousMode = !i.ContinuousMode
 	if i.ContinuousMode {
 		i.ContinuousModeStartTime = time.Now()
@@ -862,6 +872,9 @@ func (i *Instance) ToggleContinuousMode() bool {
 
 // SetContinuousModeDuration sets the duration for continuous mode
 func (i *Instance) SetContinuousModeDuration(duration time.Duration) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	
 	i.ContinuousModeDuration = duration
 	if i.ContinuousMode {
 		// Reset start time when duration changes
@@ -871,12 +884,31 @@ func (i *Instance) SetContinuousModeDuration(duration time.Duration) {
 
 // IsContinuousMode returns whether continuous mode is enabled
 func (i *Instance) IsContinuousMode() bool {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
 	return i.ContinuousMode
+}
+
+// DisableContinuousMode safely disables continuous mode
+func (i *Instance) DisableContinuousMode() {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	
+	if i.ContinuousMode {
+		i.ContinuousMode = false
+		i.ContinuousModeStartTime = time.Time{}
+		if log.InfoLog != nil {
+			log.InfoLog.Printf("continuous mode disabled for instance '%s'", i.Title)
+		}
+	}
 }
 
 // GetContinuousModeTimeRemaining returns the time remaining in continuous mode
 // Returns 0 if continuous mode is indefinite or not enabled
 func (i *Instance) GetContinuousModeTimeRemaining() time.Duration {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	
 	if !i.ContinuousMode || i.ContinuousModeDuration == 0 {
 		return 0
 	}
@@ -888,6 +920,53 @@ func (i *Instance) GetContinuousModeTimeRemaining() time.Duration {
 		return 0
 	}
 	return remaining
+}
+
+// GetContinuousModeTimeRemainingFormatted returns a formatted string of remaining time
+// Uses caching to avoid repeated formatting
+func (i *Instance) GetContinuousModeTimeRemainingFormatted() string {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	
+	if !i.ContinuousMode {
+		return ""
+	}
+	
+	// Check cache validity (update every second)
+	if time.Since(i.cachedDurationTime) < time.Second && i.cachedDurationString != "" {
+		return i.cachedDurationString
+	}
+	
+	// Need to temporarily unlock for GetContinuousModeTimeRemaining call
+	i.mu.RUnlock()
+	remaining := i.GetContinuousModeTimeRemaining()
+	i.mu.RLock()
+	
+	if remaining == 0 {
+		i.cachedDurationString = ""
+		i.cachedDurationTime = time.Now()
+		return ""
+	}
+	
+	// Format remaining time
+	hours := int(remaining.Hours())
+	minutes := int(remaining.Minutes()) % 60
+	seconds := int(remaining.Seconds()) % 60
+	
+	var timeStr string
+	if hours > 0 {
+		timeStr = fmt.Sprintf("%dh%dm", hours, minutes)
+	} else if minutes > 0 {
+		timeStr = fmt.Sprintf("%dm%ds", minutes, seconds)
+	} else {
+		timeStr = fmt.Sprintf("%ds", seconds)
+	}
+	
+	// Cache the result
+	i.cachedDurationString = timeStr
+	i.cachedDurationTime = time.Now()
+	
+	return timeStr
 }
 
 // DetectCrashAndRestart detects if Claude Code crashed and restarts it with --resume

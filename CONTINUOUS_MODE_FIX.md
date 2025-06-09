@@ -75,8 +75,31 @@ To test the fix:
    - Send the `/continuous` command with time info
    - Auto-continue working
 
-## Future Enhancements
-The system now supports setting a duration for continuous mode (e.g., "run for 2 hours"), though the UI for this isn't implemented yet. The backend is ready to handle:
-- `SetContinuousModeDuration(duration)` - Set how long continuous mode should run
-- Automatic expiration when time runs out
-- Clear time remaining display in continue messages
+## Complete Implementation Details
+
+### Duration Input
+When enabling continuous mode (Ctrl+G), users can now:
+- Enter a duration like "30m", "2h", "1h30m"
+- Press Enter for indefinite duration
+- Maximum duration is 24 hours
+- Durations over 2 hours trigger a warning in logs
+
+### UI Improvements
+1. **List View**: Shows remaining time as `[C:5m30s]` or `[C]` for indefinite
+2. **Duration Input**: Clear examples and max duration shown
+3. **Expiration Notification**: Shows "⏰ Continuous mode expired" when time runs out
+
+### Thread Safety
+- All continuous mode operations are protected by mutex
+- Safe concurrent access from UI and watchdog threads
+- Proper state management with dedicated flags
+
+### Performance
+- Cached duration formatting (updates once per second)
+- Optimized expiration checking
+- Minimal overhead in update loop
+
+### Integration
+- Works seamlessly with pause/resume
+- Continuous mode state persists across session saves
+- Compatible with existing watchdog features

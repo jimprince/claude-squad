@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -69,6 +70,10 @@ type home struct {
 
 	// promptAfterName tracks if we should enter prompt mode after naming
 	promptAfterName bool
+	
+	// Continuous mode state
+	continuousModeTarget  *session.Instance // Instance we're setting continuous mode for
+	isContinuousModeInput bool              // True when inputting duration
 
 	// keySent is used to manage underlining menu items
 	keySent bool
@@ -225,12 +230,16 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			
 			// Check if continuous mode has expired
-			if instance.IsContinuousMode() && instance.ContinuousModeDuration > 0 {
+			if instance.IsContinuousMode() {
 				remaining := instance.GetContinuousModeTimeRemaining()
-				if remaining <= 0 {
+				if remaining <= 0 && instance.ContinuousModeDuration > 0 {
 					// Continuous mode has expired, disable it
-					instance.ContinuousMode = false
-					log.InfoLog.Printf("continuous mode expired for instance '%s'", instance.Title)
+					instance.DisableContinuousMode()
+					
+					// If this is the selected instance, show notification
+					if m.list.GetSelectedInstance() == instance {
+						m.errBox.SetError(fmt.Errorf("⏰ Continuous mode expired for '%s'", instance.Title))
+					}
 				}
 			}
 			
@@ -435,19 +444,109 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 				if selected == nil {
 					return m, nil
 				}
-				if err := selected.SendPrompt(m.textInputOverlay.GetValue()); err != nil {
-					return m, m.handleError(err)
+				
+				// Check if we're setting continuous mode duration
+				if m.isContinuousModeInput && m.continuousModeTarget != nil {
+					// Parse duration
+					durationStr := strings.TrimSpace(m.textInputOverlay.GetValue())
+					var duration time.Duration
+					var err error
+					
+					if durationStr != "" {
+						// Parse duration string (e.g., "2h", "30m", "1h30m")
+						duration, err = time.ParseDuration(durationStr)
+						if err != nil {
+							// Try adding common suffixes if parsing fails
+							if !strings.ContainsAny(durationStr, "hms") {
+								// Assume hours if no unit specified
+								duration, err = time.ParseDuration(durationStr + "h")
+							}
+							
+							if err != nil {
+								m.isContinuousModeInput = false
+								m.continuousModeTarget = nil
+								m.textInputOverlay = nil
+								m.state = stateDefault
+								return m, tea.Sequence(
+									tea.WindowSize(),
+									func() tea.Msg {
+										m.menu.SetState(ui.StateDefault)
+										return nil
+									},
+									m.handleError(fmt.Errorf("invalid duration format: %s", durationStr)),
+								)
+							}
+						}
+					}
+					
+					// Validate duration limits
+					const MaxContinuousModeDuration = 24 * time.Hour
+					const LongDurationThreshold = 2 * time.Hour
+					
+					if duration > MaxContinuousModeDuration {
+						m.isContinuousModeInput = false
+						m.continuousModeTarget = nil
+						m.textInputOverlay = nil
+						m.state = stateDefault
+						return m, tea.Sequence(
+							tea.WindowSize(),
+							func() tea.Msg {
+								m.menu.SetState(ui.StateDefault)
+								return nil
+							},
+							m.handleError(fmt.Errorf("duration cannot exceed 24 hours")),
+						)
+					}
+					
+					// Warn for long durations
+					if duration > LongDurationThreshold {
+						// For now, just log a warning. In future, could add confirmation
+						log.WarningLog.Printf("setting continuous mode for long duration: %v", duration)
+					}
+					
+					// Set continuous mode with duration
+					m.continuousModeTarget.SetContinuousModeDuration(duration)
+					m.continuousModeTarget.ToggleContinuousMode()
+					
+					modeText := "enabled (indefinite duration)"
+					if duration > 0 {
+						modeText = fmt.Sprintf("enabled for %v", duration)
+					}
+					
+					log.InfoLog.Printf("continuous mode %s for '%s'", modeText, m.continuousModeTarget.Title)
+					m.isContinuousModeInput = false
+					m.continuousModeTarget = nil
+					m.textInputOverlay = nil
+					m.state = stateDefault
+					return m, tea.Sequence(
+						tea.WindowSize(),
+						func() tea.Msg {
+							m.menu.SetState(ui.StateDefault)
+							return nil
+						},
+						m.handleError(fmt.Errorf("✓ Continuous mode %s for '%s'", modeText, m.continuousModeTarget.Title)),
+					)
+				} else {
+					// Regular prompt handling
+					if err := selected.SendPrompt(m.textInputOverlay.GetValue()); err != nil {
+						return m, m.handleError(err)
+					}
 				}
 			}
 
 			// Close the overlay and reset state
 			m.textInputOverlay = nil
 			m.state = stateDefault
+			m.promptAfterName = false
+			m.isContinuousModeInput = false
+			m.continuousModeTarget = nil
 			return m, tea.Sequence(
 				tea.WindowSize(),
 				func() tea.Msg {
 					m.menu.SetState(ui.StateDefault)
-					m.showHelpScreen(helpTypeInstanceStart, nil)
+					if !m.promptAfterName && !m.isContinuousModeInput {
+						m.showHelpScreen(helpTypeInstanceStart, nil)
+					}
 					return nil
 				},
 			)
@@ -485,14 +584,27 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		if selected == nil {
 			return m, nil
 		}
-		continuousMode := selected.ToggleContinuousMode()
-		modeText := "disabled"
-		if continuousMode {
-			modeText = "enabled (2s stability check, will auto-continue on completion)"
+		
+		// If continuous mode is currently enabled, just disable it
+		if selected.IsContinuousMode() {
+			selected.ToggleContinuousMode()
+			log.InfoLog.Printf("continuous mode disabled for '%s'", selected.Title)
+			return m, m.handleError(fmt.Errorf("✓ Continuous mode disabled for '%s'", selected.Title))
 		}
-		// Use a different message style to indicate this is informational, not an error
-		log.InfoLog.Printf("continuous mode %s for '%s'", modeText, selected.Title)
-		return m, m.handleError(fmt.Errorf("✓ Continuous mode %s for '%s'", modeText, selected.Title))
+		
+		// Otherwise, show duration input
+		m.state = statePrompt
+		m.menu.SetState(ui.StatePrompt)
+		m.textInputOverlay = overlay.NewTextInputOverlay(
+			"Enter duration (e.g., '30m', '2h', '1h30m', max 24h) or press Enter for indefinite:", 
+			"",
+		)
+		
+		// Store which instance we're setting continuous mode for
+		m.continuousModeTarget = selected
+		m.isContinuousModeInput = true
+		
+		return m, nil
 	case keys.KeyPrompt:
 		if m.list.NumInstances() >= GlobalInstanceLimit {
 			return m, m.handleError(

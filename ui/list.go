@@ -148,8 +148,14 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	continuousIndicator := ""
 	continuousIndicatorWidth := 0
 	if i.IsContinuousMode() {
-		continuousIndicator = continuousStyle.Render(continuousIcon)
-		continuousIndicatorWidth = len(continuousIcon) + 1 // Account for space
+		timeStr := i.GetContinuousModeTimeRemainingFormatted()
+		if timeStr != "" {
+			continuousIndicator = continuousStyle.Render(fmt.Sprintf("[C:%s]", timeStr))
+			continuousIndicatorWidth = len(fmt.Sprintf("[C:%s]", timeStr)) + 1
+		} else {
+			continuousIndicator = continuousStyle.Render(continuousIcon)
+			continuousIndicatorWidth = len(continuousIcon) + 1 // Account for space
+		}
 	}
 	
 	widthAvail := r.width - 3 - len(prefix) - 1 - continuousIndicatorWidth
