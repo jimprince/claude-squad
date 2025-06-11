@@ -464,3 +464,83 @@ func TestConfirmationModalVisualAppearance(t *testing.T) {
 	// Test that the danger indicator is preserved
 	assert.Contains(t, rendered, "[!")
 }
+
+// TestContinuousModeFixed tests that the continuous mode functionality works without panicking
+func TestContinuousModeFixed(t *testing.T) {
+	// Create a minimal setup
+	spinner := spinner.New(spinner.WithSpinner(spinner.MiniDot))
+	list := ui.NewList(&spinner, false)
+
+	// Add test instance 
+	instance, err := session.NewInstance(session.InstanceOptions{
+		Title:   "test-session",
+		Path:    t.TempDir(),
+		Program: "claude",
+		AutoYes: false,
+	})
+	require.NoError(t, err)
+	_ = list.AddInstance(instance)
+	list.SetSelectedInstance(0)
+
+	h := &home{
+		ctx:                     context.Background(),
+		state:                   statePrompt,
+		appConfig:               config.DefaultConfig(),
+		list:                    list,
+		menu:                    ui.NewMenu(),
+		errBox:                  ui.NewErrBox(),
+		isContinuousModeInput:   true,
+		continuousModeTarget:    instance,
+		textInputOverlay:        overlay.NewTextInputOverlay("Enter duration for continuous mode (5m, 1h, etc.) or press Enter for indefinite:", ""),
+	}
+
+	// This should work without panicking after the fix
+	t.Run("continuous mode duration entry works without panic", func(t *testing.T) {
+		// Focus the enter button so pressing Enter will submit the form
+		h.textInputOverlay.FocusIndex = 1
+		
+		// Call the handleKeyPress with Enter to trigger form submission
+		keyMsg := tea.KeyMsg{Type: tea.KeyEnter}
+		
+		// This should NOT panic after the fix
+		assert.NotPanics(t, func() {
+			result, _ := h.handleKeyPress(keyMsg)
+			homeResult := result.(*home)
+			
+			// Verify the state is reset correctly
+			assert.Equal(t, stateDefault, homeResult.state)
+			assert.Nil(t, homeResult.continuousModeTarget)
+			assert.False(t, homeResult.isContinuousModeInput)
+			assert.Nil(t, homeResult.textInputOverlay)
+		}, "Should not panic when accessing continuousModeTarget.Title after fix")
+	})
+}
+
+// TestTextInputSingleLine tests that the text input overlay uses single-line input
+func TestTextInputSingleLine(t *testing.T) {
+	// Create a text input overlay
+	overlay := overlay.NewTextInputOverlay("Enter duration:", "")
+	
+	// Verify it's using textinput (single-line) not textarea (multi-line)
+	// We can test this by simulating character input and ensuring it stays on one line
+	testChars := []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune("3")},
+		{Type: tea.KeyRunes, Runes: []rune("0")},
+		{Type: tea.KeyRunes, Runes: []rune("m")},
+	}
+	
+	for _, keyMsg := range testChars {
+		shouldClose := overlay.HandleKeyPress(keyMsg)
+		assert.False(t, shouldClose, "Should not close on character input")
+	}
+	
+	// Check that the value is captured correctly as a single line
+	value := overlay.GetValue()
+	assert.Equal(t, "30m", value, "Should capture input as single line without newlines")
+	
+	// Verify that pressing Enter on the input field submits (single-line behavior)
+	enterKey := tea.KeyMsg{Type: tea.KeyEnter}
+	shouldClose := overlay.HandleKeyPress(enterKey)
+	assert.True(t, shouldClose, "Enter should submit in single-line mode")
+	assert.True(t, overlay.IsSubmitted(), "Should be marked as submitted after Enter")
+}
