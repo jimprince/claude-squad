@@ -26,6 +26,7 @@ const (
 	KeyResumeSelect // Key for selecting a session to resume
 	KeyHelp   // Key for showing help screen
 	KeyContinuousMode // Key for toggling continuous mode
+	KeyRestart // Key for restarting Claude Code with session restore
 
 	// Diff keybindings
 	KeyShiftUp
@@ -57,6 +58,7 @@ var GlobalKeyStringsMap = map[string]KeyName{
 	"p":          KeySubmit,
 	"?":          KeyHelp,
 	"ctrl+g":     KeyContinuousMode,
+	"ctrl+r":     KeyRestart,
 }
 
 // GlobalkeyBindings is a global, immutable map of KeyName tot keybinding.
@@ -120,6 +122,10 @@ var GlobalkeyBindings = map[KeyName]key.Binding{
 	KeyContinuousMode: key.NewBinding(
 		key.WithKeys("ctrl+g"),
 		key.WithHelp("ctrl+g", "continuous mode"),
+	),
+	KeyRestart: key.NewBinding(
+		key.WithKeys("ctrl+r"),
+		key.WithHelp("ctrl+r", "restart"),
 	),
 
 	// -- Special keybindings --

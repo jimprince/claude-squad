@@ -138,7 +138,7 @@ func (m *Menu) addInstanceOptions() {
 	}
 
 	// System group
-	systemGroup := []keys.KeyName{keys.KeyTab, keys.KeyContinuousMode, keys.KeyHelp, keys.KeyQuit}
+	systemGroup := []keys.KeyName{keys.KeyTab, keys.KeyContinuousMode, keys.KeyRestart, keys.KeyHelp, keys.KeyQuit}
 
 	// Combine all groups
 	options = append(options, actionGroup...)
@@ -156,14 +156,27 @@ func (m *Menu) SetSize(width, height int) {
 func (m *Menu) String() string {
 	var s strings.Builder
 
-	// Define group boundaries
+	// Define group boundaries dynamically based on actual content
+	// Count items in each group
+	instanceGroupSize := 2 // Always n, D
+	actionGroupSize := 0
+	
+	// Find where action group ends and system group begins
+	for i := instanceGroupSize; i < len(m.options); i++ {
+		if m.options[i] == keys.KeyTab {
+			// System group starts here
+			actionGroupSize = i - instanceGroupSize
+			break
+		}
+	}
+	
 	groups := []struct {
 		start int
 		end   int
 	}{
-		{0, 2}, // Instance management group (n, d)
-		{2, 5}, // Action group (enter, submit, pause/resume)
-		{6, 10}, // System group (tab, ctrl+g, help, q)
+		{0, instanceGroupSize},                              // Instance management group (n, d)
+		{instanceGroupSize, instanceGroupSize + actionGroupSize}, // Action group (variable size)
+		{instanceGroupSize + actionGroupSize, len(m.options)},    // System group (all remaining)
 	}
 
 	for i, k := range m.options {
