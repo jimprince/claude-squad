@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -69,6 +70,10 @@ type home struct {
 
 	// promptAfterName tracks if we should enter prompt mode after naming
 	promptAfterName bool
+	
+	// Continuous mode state
+	continuousModeTarget  *session.Instance // Instance we're setting continuous mode for
+	isContinuousModeInput bool              // True when inputting duration
 
 	// keySent is used to manage underlining menu items
 	keySent bool
@@ -217,6 +222,41 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err := instance.UpdateDiffStats(); err != nil {
 				log.WarningLog.Printf("could not update diff stats: %v", err)
 			}
+			
+			// Crash detection and auto-restart
+			if instance.DetectCrashAndRestart() {
+				// Session was restarted, skip other checks this cycle
+				continue
+			}
+			
+			// Check if continuous mode has expired
+			if instance.IsContinuousMode() {
+				remaining := instance.GetContinuousModeTimeRemaining()
+				if remaining <= 0 && instance.ContinuousModeDuration > 0 {
+					// Continuous mode has expired, disable it
+					instance.DisableContinuousMode()
+					
+					// If this is the selected instance, show notification
+					if m.list.GetSelectedInstance() == instance {
+						m.errBox.SetError(fmt.Errorf("⏰ Continuous mode expired for '%s'", instance.Title))
+					}
+				}
+			}
+			
+			// Watchdog functionality
+			if instance.DetectStall(m.appConfig.StallTimeoutSeconds, m.appConfig.ContinuousModeTimeoutSeconds) {
+				enabled, _, stallCount := instance.GetWatchdogStatus()
+				if enabled && stallCount < m.appConfig.MaxContinueAttempts {
+					if err := instance.InjectContinue(m.appConfig.ContinueCommands); err != nil {
+						log.ErrorLog.Printf("watchdog failed to inject continue for instance '%s': %v", 
+							instance.Title, err)
+					}
+				} else if stallCount >= m.appConfig.MaxContinueAttempts {
+					log.WarningLog.Printf("watchdog gave up on instance '%s' after %d attempts", 
+						instance.Title, stallCount)
+					// Optionally pause the instance or take other action
+				}
+			}
 		}
 		return m, tickUpdateMetadataCmd
 	case tea.MouseMsg:
@@ -332,6 +372,9 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 				m.state = stateDefault
 				return m, m.handleError(err)
 			}
+			// Initialize watchdog for new instances
+			instance.InitializeWatchdog(m.appConfig.WatchdogEnabled)
+			
 			// Save after adding new instance
 			if err := m.storage.SaveInstances(m.list.GetInstances()); err != nil {
 				return m, m.handleError(err)
@@ -401,19 +444,112 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 				if selected == nil {
 					return m, nil
 				}
-				if err := selected.SendPrompt(m.textInputOverlay.GetValue()); err != nil {
-					return m, m.handleError(err)
+				
+				// Check if we're setting continuous mode duration
+				if m.isContinuousModeInput && m.continuousModeTarget != nil {
+					// Parse duration
+					durationStr := strings.TrimSpace(m.textInputOverlay.GetValue())
+					var duration time.Duration
+					var err error
+					
+					if durationStr != "" {
+						// Parse duration string (e.g., "2h", "30m", "1h30m")
+						duration, err = time.ParseDuration(durationStr)
+						if err != nil {
+							// Try adding common suffixes if parsing fails
+							if !strings.ContainsAny(durationStr, "hms") {
+								// Assume hours if no unit specified
+								duration, err = time.ParseDuration(durationStr + "h")
+							}
+							
+							if err != nil {
+								m.isContinuousModeInput = false
+								m.continuousModeTarget = nil
+								m.textInputOverlay = nil
+								m.state = stateDefault
+								return m, tea.Sequence(
+									tea.WindowSize(),
+									func() tea.Msg {
+										m.menu.SetState(ui.StateDefault)
+										return nil
+									},
+									m.handleError(fmt.Errorf("invalid duration format: %s", durationStr)),
+								)
+							}
+						}
+					}
+					
+					// Validate duration limits
+					const MaxContinuousModeDuration = 24 * time.Hour
+					const LongDurationThreshold = 2 * time.Hour
+					
+					if duration > MaxContinuousModeDuration {
+						m.isContinuousModeInput = false
+						m.continuousModeTarget = nil
+						m.textInputOverlay = nil
+						m.state = stateDefault
+						return m, tea.Sequence(
+							tea.WindowSize(),
+							func() tea.Msg {
+								m.menu.SetState(ui.StateDefault)
+								return nil
+							},
+							m.handleError(fmt.Errorf("duration cannot exceed 24 hours")),
+						)
+					}
+					
+					// Warn for long durations
+					if duration > LongDurationThreshold {
+						// For now, just log a warning. In future, could add confirmation
+						log.WarningLog.Printf("setting continuous mode for long duration: %v", duration)
+					}
+					
+					// Set continuous mode with duration
+					m.continuousModeTarget.SetContinuousModeDuration(duration)
+					m.continuousModeTarget.ToggleContinuousMode()
+					
+					modeText := "enabled (indefinite duration)"
+					if duration > 0 {
+						modeText = fmt.Sprintf("enabled for %v", duration)
+					}
+					
+					// Capture the title before setting continuousModeTarget to nil
+					targetTitle := m.continuousModeTarget.Title
+					
+					log.InfoLog.Printf("continuous mode %s for '%s'", modeText, targetTitle)
+					m.isContinuousModeInput = false
+					m.continuousModeTarget = nil
+					m.textInputOverlay = nil
+					m.state = stateDefault
+					return m, tea.Sequence(
+						tea.WindowSize(),
+						func() tea.Msg {
+							m.menu.SetState(ui.StateDefault)
+							return nil
+						},
+						m.handleError(fmt.Errorf("✓ Continuous mode %s for '%s'", modeText, targetTitle)),
+					)
+				} else {
+					// Regular prompt handling
+					if err := selected.SendPrompt(m.textInputOverlay.GetValue()); err != nil {
+						return m, m.handleError(err)
+					}
 				}
 			}
 
 			// Close the overlay and reset state
 			m.textInputOverlay = nil
 			m.state = stateDefault
+			m.promptAfterName = false
+			m.isContinuousModeInput = false
+			m.continuousModeTarget = nil
 			return m, tea.Sequence(
 				tea.WindowSize(),
 				func() tea.Msg {
 					m.menu.SetState(ui.StateDefault)
-					m.showHelpScreen(helpTypeInstanceStart, nil)
+					if !m.promptAfterName && !m.isContinuousModeInput {
+						m.showHelpScreen(helpTypeInstanceStart, nil)
+					}
 					return nil
 				},
 			)
@@ -446,6 +582,49 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 	switch name {
 	case keys.KeyHelp:
 		return m.showHelpScreen(helpTypeGeneral, nil)
+	case keys.KeyContinuousMode:
+		selected := m.list.GetSelectedInstance()
+		if selected == nil {
+			return m, nil
+		}
+		
+		// If continuous mode is currently enabled, just disable it
+		if selected.IsContinuousMode() {
+			selected.ToggleContinuousMode()
+			log.InfoLog.Printf("continuous mode disabled for '%s'", selected.Title)
+			return m, m.handleError(fmt.Errorf("✓ Continuous mode disabled for '%s'", selected.Title))
+		}
+		
+		// Otherwise, show duration input
+		m.state = statePrompt
+		m.menu.SetState(ui.StatePrompt)
+		m.textInputOverlay = overlay.NewTextInputOverlay(
+			"Enter duration (e.g., '30m', '2h', '1h30m', max 24h) or press Enter for indefinite:", 
+			"",
+		)
+		
+		// Store which instance we're setting continuous mode for
+		m.continuousModeTarget = selected
+		m.isContinuousModeInput = true
+		
+		return m, nil
+	case keys.KeyRestart:
+		selected := m.list.GetSelectedInstance()
+		if selected == nil {
+			return m, nil
+		}
+
+		// Create the restart action as a tea.Cmd
+		restartAction := func() tea.Msg {
+			if err := selected.ManualRestart(); err != nil {
+				return err
+			}
+			return instanceChangedMsg{}
+		}
+
+		// Show confirmation modal
+		message := fmt.Sprintf("[!] Restart '%s' and restore session?", selected.Title)
+		return m, m.confirmAction(message, restartAction)
 	case keys.KeyPrompt:
 		if m.list.NumInstances() >= GlobalInstanceLimit {
 			return m, m.handleError(
@@ -588,6 +767,8 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		if err := selected.Resume(); err != nil {
 			return m, m.handleError(err)
 		}
+		// Initialize watchdog for resumed instances
+		selected.InitializeWatchdog(m.appConfig.WatchdogEnabled)
 		return m, tea.WindowSize()
 	case keys.KeyEnter:
 		if m.list.NumInstances() == 0 {

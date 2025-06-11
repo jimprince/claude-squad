@@ -5,12 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
-const ConfigFileName = "config.json"
+const (
+	ConfigFileName = "config.json"
+	defaultProgram = "claude"
+)
 
 // GetConfigDir returns the path to the application's configuration directory
 func GetConfigDir() (string, error) {
@@ -31,12 +36,30 @@ type Config struct {
 	DaemonPollInterval int `json:"daemon_poll_interval"`
 	// BranchPrefix is the prefix used for git branches created by the application.
 	BranchPrefix string `json:"branch_prefix"`
+	
+	// Watchdog configuration
+	// WatchdogEnabled determines if watchdog monitoring is enabled by default for new instances
+	WatchdogEnabled bool `json:"watchdog_enabled"`
+	// StallTimeoutSeconds is how long to wait before considering a session stalled (in seconds)
+	StallTimeoutSeconds int `json:"stall_timeout_seconds"`
+	// MaxContinueAttempts is the maximum number of times to attempt recovery before giving up
+	MaxContinueAttempts int `json:"max_continue_attempts"`
+	// ContinueCommands is the list of commands to try when attempting to unstall a session
+	ContinueCommands []string `json:"continue_commands"`
+	// ContinuousModeTimeoutSeconds is the more aggressive timeout for continuous mode (in seconds)
+	ContinuousModeTimeoutSeconds int `json:"continuous_mode_timeout_seconds"`
 }
 
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
+	program, err := GetClaudeCommand()
+	if err != nil {
+		log.ErrorLog.Printf("failed to get claude command: %v", err)
+		program = defaultProgram
+	}
+
 	return &Config{
-		DefaultProgram:     "claude",
+		DefaultProgram:     program,
 		AutoYes:            false,
 		DaemonPollInterval: 1000,
 		BranchPrefix: func() string {
@@ -47,10 +70,63 @@ func DefaultConfig() *Config {
 			}
 			return fmt.Sprintf("%s/", strings.ToLower(user.Username))
 		}(),
+		// Watchdog defaults
+		WatchdogEnabled:               true,
+		StallTimeoutSeconds:           300, // 5 minutes
+		MaxContinueAttempts:           3,
+		ContinueCommands:              []string{"continue", "yes", "y", "proceed", "\n"},
+		ContinuousModeTimeoutSeconds:  8, // 8 seconds for continuous mode
 	}
 }
 
-// LoadConfig loads the configuration from disk. If it cannot be done, we return the default configuration.
+// GetClaudeCommand attempts to find the "claude" command in the user's shell
+// It checks in the following order:
+// 1. Shell alias resolution: using "which" command
+// 2. PATH lookup
+//
+// If both fail, it returns an error.
+func GetClaudeCommand() (string, error) {
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/bash" // Default to bash if SHELL is not set
+	}
+
+	// Force the shell to load the user's profile and then run the command
+	// For zsh, source .zshrc; for bash, source .bashrc
+	var shellCmd string
+	if strings.Contains(shell, "zsh") {
+		shellCmd = "source ~/.zshrc 2>/dev/null || true; which claude"
+	} else if strings.Contains(shell, "bash") {
+		shellCmd = "source ~/.bashrc 2>/dev/null || true; which claude"
+	} else {
+		shellCmd = "which claude"
+	}
+
+	cmd := exec.Command(shell, "-c", shellCmd)
+	output, err := cmd.Output()
+	if err == nil && len(output) > 0 {
+		path := strings.TrimSpace(string(output))
+		if path != "" {
+			// Check if the output is an alias definition and extract the actual path
+			// Handle formats like "claude: aliased to /path/to/claude" or other shell-specific formats
+			aliasRegex := regexp.MustCompile(`(?:aliased to|->|=)\s*([^\s]+)`)
+			matches := aliasRegex.FindStringSubmatch(path)
+			if len(matches) > 1 {
+				path = matches[1]
+			}
+			return path, nil
+		}
+	}
+
+	// Otherwise, try to find in PATH directly
+	claudePath, err := exec.LookPath("claude")
+	if err == nil {
+		return claudePath, nil
+	}
+
+	return "", fmt.Errorf("claude command not found in aliases or PATH")
+}
+
 func LoadConfig() *Config {
 	configDir, err := GetConfigDir()
 	if err != nil {

@@ -1,14 +1,14 @@
 package overlay
 
 import (
-	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
 // TextInputOverlay represents a text input overlay with state management.
 type TextInputOverlay struct {
-	textarea      textarea.Model
+	textinput     textinput.Model
 	Title         string
 	FocusIndex    int // 0 for text input, 1 for enter button
 	Submitted     bool
@@ -19,20 +19,19 @@ type TextInputOverlay struct {
 
 // NewTextInputOverlay creates a new text input overlay with the given title and initial value.
 func NewTextInputOverlay(title string, initialValue string) *TextInputOverlay {
-	ti := textarea.New()
+	ti := textinput.New()
 	ti.SetValue(initialValue)
 	ti.Focus()
-	ti.ShowLineNumbers = false
 	ti.Prompt = ""
-	ti.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	
+	// Set placeholder text for duration input
+	ti.Placeholder = "e.g., 30m, 2h, 1h30m"
 
 	// Ensure no character limit
 	ti.CharLimit = 0
-	// Ensure no maximum height limit
-	ti.MaxHeight = 0
 
 	return &TextInputOverlay{
-		textarea:   ti,
+		textinput:  ti,
 		Title:      title,
 		FocusIndex: 0,
 		Submitted:  false,
@@ -41,14 +40,14 @@ func NewTextInputOverlay(title string, initialValue string) *TextInputOverlay {
 }
 
 func (t *TextInputOverlay) SetSize(width, height int) {
-	t.textarea.SetHeight(height) // Set textarea height to 10 lines
+	t.textinput.Width = width - 6 // Account for padding and borders
 	t.width = width
 	t.height = height
 }
 
 // Init initializes the text input overlay model
 func (t *TextInputOverlay) Init() tea.Cmd {
-	return textarea.Blink
+	return textinput.Blink
 }
 
 // View renders the model's view
@@ -64,18 +63,18 @@ func (t *TextInputOverlay) HandleKeyPress(msg tea.KeyMsg) bool {
 		// Toggle focus between input and enter button.
 		t.FocusIndex = (t.FocusIndex + 1) % 2
 		if t.FocusIndex == 0 {
-			t.textarea.Focus()
+			t.textinput.Focus()
 		} else {
-			t.textarea.Blur()
+			t.textinput.Blur()
 		}
 		return false
 	case tea.KeyShiftTab:
 		// Toggle focus in reverse.
 		t.FocusIndex = (t.FocusIndex + 1) % 2
 		if t.FocusIndex == 0 {
-			t.textarea.Focus()
+			t.textinput.Focus()
 		} else {
-			t.textarea.Blur()
+			t.textinput.Blur()
 		}
 		return false
 	case tea.KeyEsc:
@@ -90,10 +89,15 @@ func (t *TextInputOverlay) HandleKeyPress(msg tea.KeyMsg) bool {
 			}
 			return true
 		}
-		fallthrough // Send enter key to textarea
+		// For single-line input, Enter on the input field should submit
+		t.Submitted = true
+		if t.OnSubmit != nil {
+			t.OnSubmit()
+		}
+		return true
 	default:
 		if t.FocusIndex == 0 {
-			t.textarea, _ = t.textarea.Update(msg)
+			t.textinput, _ = t.textinput.Update(msg)
 		}
 		return false
 	}
@@ -101,7 +105,7 @@ func (t *TextInputOverlay) HandleKeyPress(msg tea.KeyMsg) bool {
 
 // GetValue returns the current value of the text input.
 func (t *TextInputOverlay) GetValue() string {
-	return t.textarea.Value()
+	return t.textinput.Value()
 }
 
 // IsSubmitted returns whether the form was submitted.
@@ -140,12 +144,12 @@ func (t *TextInputOverlay) Render() string {
 		Background(lipgloss.Color("62")).
 		Foreground(lipgloss.Color("0"))
 
-	// Set textarea width to fit within the overlay
-	t.textarea.SetWidth(t.width - 6) // Account for padding and borders
+	// Set textinput width to fit within the overlay
+	t.textinput.Width = t.width - 6 // Account for padding and borders
 
 	// Build the view
 	content := titleStyle.Render(t.Title) + "\n"
-	content += t.textarea.View() + "\n\n"
+	content += t.textinput.View() + "\n\n"
 
 	// Render enter button with appropriate style
 	enterButton := " Enter "

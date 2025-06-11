@@ -23,7 +23,9 @@ const (
 	KeyCheckout
 	KeyResume
 	KeyPrompt // New key for entering a prompt
+	KeyResumeSelect // Key for selecting a session to resume
 	KeyHelp   // Key for showing help screen
+	KeyContinuousMode // Key for toggling continuous mode
 
 	// Diff keybindings
 	KeyShiftUp
@@ -38,7 +40,12 @@ var GlobalKeyStringsMap = map[string]KeyName{
 	"j":          KeyDown,
 	"shift+up":   KeyShiftUp,
 	"shift+down": KeyShiftDown,
+	"alt+up":     KeyShiftUp,
+	"alt+down":   KeyShiftDown,
+	"option+up":  KeyShiftUp,
+	"option+down": KeyShiftDown,
 	"N":          KeyPrompt,
+	"shift+n":    KeyResumeSelect,
 	"enter":      KeyEnter,
 	"o":          KeyEnter,
 	"n":          KeyNew,
@@ -49,6 +56,7 @@ var GlobalKeyStringsMap = map[string]KeyName{
 	"r":          KeyResume,
 	"p":          KeySubmit,
 	"?":          KeyHelp,
+	"ctrl+g":     KeyContinuousMode,
 }
 
 // GlobalkeyBindings is a global, immutable map of KeyName tot keybinding.
@@ -62,12 +70,12 @@ var GlobalkeyBindings = map[KeyName]key.Binding{
 		key.WithHelp("↓/j", "down"),
 	),
 	KeyShiftUp: key.NewBinding(
-		key.WithKeys("shift+up"),
-		key.WithHelp("shift+↑", "scroll"),
+		key.WithKeys("shift+up", "alt+up", "option+up"),
+		key.WithHelp("shift+↑/opt+↑", "scroll"),
 	),
 	KeyShiftDown: key.NewBinding(
-		key.WithKeys("shift+down"),
-		key.WithHelp("shift+↓", "scroll"),
+		key.WithKeys("shift+down", "alt+down", "option+down"),
+		key.WithHelp("shift+↓/opt+↓", "scroll"),
 	),
 	KeyEnter: key.NewBinding(
 		key.WithKeys("enter", "o"),
@@ -108,6 +116,10 @@ var GlobalkeyBindings = map[KeyName]key.Binding{
 	KeyResume: key.NewBinding(
 		key.WithKeys("r"),
 		key.WithHelp("r", "resume"),
+	),
+	KeyContinuousMode: key.NewBinding(
+		key.WithKeys("ctrl+g"),
+		key.WithHelp("ctrl+g", "continuous mode"),
 	),
 
 	// -- Special keybindings --
