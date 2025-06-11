@@ -969,6 +969,45 @@ func (i *Instance) GetContinuousModeTimeRemainingFormatted() string {
 	return timeStr
 }
 
+// ManualRestart allows user to manually restart Claude Code with session restore
+func (i *Instance) ManualRestart() error {
+	// Acquire mutex to prevent concurrent restarts
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	
+	// Validate state
+	if !i.started {
+		return fmt.Errorf("cannot restart: instance not started")
+	}
+	if i.Status == Paused {
+		return fmt.Errorf("cannot restart: instance is paused")
+	}
+	if !strings.Contains(strings.ToLower(i.Program), "claude") {
+		return fmt.Errorf("restart only supported for Claude Code sessions")
+	}
+
+	// Check if we're already restarting
+	const restartCooldown = 10 * time.Second
+	if time.Since(i.LastRestartTime) < restartCooldown {
+		return fmt.Errorf("please wait %v before restarting again", 
+			restartCooldown - time.Since(i.LastRestartTime))
+	}
+
+	// Save current state
+	i.LastRestartTime = time.Now()
+	i.RestartAttempts++
+
+	// Log the restart
+	log.InfoLog.Printf("user initiated restart for instance '%s'", i.Title)
+
+	// Perform the restart
+	if err := i.restartClaudeWithResume(); err != nil {
+		return fmt.Errorf("failed to restart Claude Code: %w", err)
+	}
+
+	return nil
+}
+
 // DetectCrashAndRestart detects if Claude Code crashed and restarts it with --resume
 func (i *Instance) DetectCrashAndRestart() bool {
 	if !i.started || i.Status == Paused {
@@ -1020,14 +1059,23 @@ func (i *Instance) DetectCrashAndRestart() bool {
 
 // restartClaudeWithResume restarts Claude Code with --resume and the session ID
 func (i *Instance) restartClaudeWithResume() error {
+	// Save state before restart
+	wasInContinuousMode := i.ContinuousMode
+	continuousModeStartTime := i.ContinuousModeStartTime
+	continuousModeDuration := i.ContinuousModeDuration
+	
 	// First, get the Claude session list to find the session number
 	sessionNumber, err := i.findClaudeSessionNumber()
 	if err != nil {
 		return fmt.Errorf("failed to find Claude session number: %w", err)
 	}
 
-	// Kill the existing tmux session if it's still running
+	// Gracefully close the existing tmux session if it's still running
 	if i.tmuxSession != nil {
+		// Try to send exit command first for graceful shutdown
+		_ = i.tmuxSession.SendKeys("exit")
+		time.Sleep(500 * time.Millisecond)
+		
 		if err := i.tmuxSession.Close(); err != nil {
 			log.ErrorLog.Printf("failed to close tmux session during restart: %v", err)
 		}
@@ -1050,19 +1098,44 @@ func (i *Instance) restartClaudeWithResume() error {
 
 	log.WarningLog.Printf("successfully restarted Claude Code session '%s' with session %s", i.Title, sessionNumber)
 	
-	// Claude needs a "continue" command after resuming to actually start working
-	time.Sleep(2 * time.Second) // Give Claude time to load the session
-	
-	if err := i.SendPrompt("continue"); err != nil {
-		log.ErrorLog.Printf("failed to send initial continue after restart: %v", err)
-		// Don't fail the restart, just log the error
-	} else {
-		log.InfoLog.Printf("sent initial 'continue' to resumed session '%s'", i.Title)
+	// Wait for Claude to be ready with exponential backoff
+	maxRetries := 5
+	for retry := 0; retry < maxRetries; retry++ {
+		time.Sleep(time.Duration(1<<uint(retry)) * time.Second) // 1s, 2s, 4s, 8s, 16s
+		
+		// Try to capture content to see if Claude is ready
+		if content, err := i.tmuxSession.CapturePaneContent(); err == nil {
+			contentLower := strings.ToLower(content)
+			// Check if Claude is ready (shows prompt or waiting)
+			if strings.Contains(contentLower, "claude") || 
+			   strings.Contains(contentLower, ">") ||
+			   strings.Contains(contentLower, "continue") {
+				// Claude is ready, send continue
+				if err := i.SendPrompt("continue"); err != nil {
+					log.ErrorLog.Printf("failed to send initial continue after restart: %v", err)
+				} else {
+					log.InfoLog.Printf("sent initial 'continue' to resumed session '%s'", i.Title)
+				}
+				break
+			}
+		}
+		
+		if retry == maxRetries-1 {
+			log.WarningLog.Printf("Claude may not be fully ready after restart, proceeding anyway")
+		}
 	}
 	
 	// Reset activity tracking for fresh monitoring
 	i.LastActivityTime = time.Now()
 	i.lastContentHash = ""
+	
+	// Restore continuous mode state if it was enabled
+	if wasInContinuousMode {
+		i.ContinuousMode = true
+		i.ContinuousModeStartTime = continuousModeStartTime
+		i.ContinuousModeDuration = continuousModeDuration
+		log.InfoLog.Printf("restored continuous mode state after restart")
+	}
 	
 	return nil
 }
