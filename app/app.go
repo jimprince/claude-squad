@@ -608,23 +608,6 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		m.isContinuousModeInput = true
 		
 		return m, nil
-	case keys.KeyRestart:
-		selected := m.list.GetSelectedInstance()
-		if selected == nil {
-			return m, nil
-		}
-
-		// Create the restart action as a tea.Cmd
-		restartAction := func() tea.Msg {
-			if err := selected.ManualRestart(); err != nil {
-				return err
-			}
-			return instanceChangedMsg{}
-		}
-
-		// Show confirmation modal
-		message := fmt.Sprintf("[!] Restart '%s' and restore session?", selected.Title)
-		return m, m.confirmAction(message, restartAction)
 	case keys.KeyPrompt:
 		if m.list.NumInstances() >= GlobalInstanceLimit {
 			return m, m.handleError(
