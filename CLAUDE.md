@@ -36,11 +36,23 @@ go build -o claude-squad-binary
 The project is typically installed as the `cs` command for easy CLI access:
 
 ```bash
-# Build and install to ~/bin (recommended)
-go build -o ~/bin/cs
+# Build and install to ~/bin (recommended) - use CGO_ENABLED=0 to avoid code signing issues on macOS
+CGO_ENABLED=0 go build -o ~/bin/cs
 
 # Or build and install to system PATH (requires sudo)
-go build -o /usr/local/bin/cs
+CGO_ENABLED=0 go build -o /usr/local/bin/cs
+```
+
+### macOS Code Signing Issues
+On macOS, unsigned binaries may get killed by Gatekeeper. If you encounter "zsh: killed" errors:
+
+```bash
+# Build without CGO to avoid signing issues
+CGO_ENABLED=0 go build -o cs
+
+# Remove quarantine attributes and add ad-hoc signature if needed
+xattr -d com.apple.quarantine ~/bin/cs 2>/dev/null
+codesign --force --deep --sign - ~/bin/cs
 ```
 
 ### Testing

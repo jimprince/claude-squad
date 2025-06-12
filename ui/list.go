@@ -140,27 +140,33 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	default:
 	}
 
-	// Cut the title if it's too long
+	// Cut the title if it's too long - exactly like upstream
 	titleText := i.Title
 	widthAvail := r.width - 3 - len(prefix) - 1
 	if widthAvail > 0 && widthAvail < len(titleText) && len(titleText) >= widthAvail-3 {
 		titleText = titleText[:widthAvail-3] + "..."
 	}
 	
-	// Create core title exactly like upstream
-	coreTitle := fmt.Sprintf("%s %s", prefix, titleText)
-	
-	// Add simple fixed-width continuous mode indicator
-	var renderedTitle string
+	// Create continuous mode indicator separately
+	var continuousIndicator string
 	if i.IsContinuousMode() {
-		renderedTitle = fmt.Sprintf("%s %s", coreTitle, continuousStyle.Render("[C]"))
+		continuousIndicator = continuousStyle.Render("[C]")
+	}
+	
+	// Use upstream approach exactly for consistent layout
+	baseTitle := lipgloss.Place(r.width-3, 1, lipgloss.Left, lipgloss.Center, fmt.Sprintf("%s %s", prefix, titleText))
+	
+	// Add continuous mode indicator as separate element if present
+	var titleContent string
+	if continuousIndicator != "" {
+		titleContent = lipgloss.JoinHorizontal(lipgloss.Left, baseTitle, " ", continuousIndicator)
 	} else {
-		renderedTitle = coreTitle
+		titleContent = baseTitle
 	}
 	
 	title := titleS.Render(lipgloss.JoinHorizontal(
 		lipgloss.Left,
-		lipgloss.Place(r.width-3, 1, lipgloss.Left, lipgloss.Center, renderedTitle),
+		titleContent,
 		" ",
 		join,
 	))
