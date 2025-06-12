@@ -59,16 +59,17 @@ var (
 			if autoYesFlag {
 				autoYes = true
 			}
+			// Kill any daemon that's running.
+			if err := daemon.StopDaemon(); err != nil {
+				log.ErrorLog.Printf("failed to stop daemon: %v", err)
+			}
+			
 			if autoYes {
 				defer func() {
 					if err := daemon.LaunchDaemon(); err != nil {
 						log.ErrorLog.Printf("failed to launch daemon: %v", err)
 					}
 				}()
-			}
-			// Kill any daemon that's running.
-			if err := daemon.StopDaemon(); err != nil {
-				log.ErrorLog.Printf("failed to stop daemon: %v", err)
 			}
 
 			return app.Run(ctx, program, autoYes)

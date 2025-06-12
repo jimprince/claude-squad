@@ -154,7 +154,12 @@ func StopDaemon() error {
 	}
 
 	if err := proc.Kill(); err != nil {
-		return fmt.Errorf("failed to stop daemon process: %w", err)
+		// If the process is already finished, that's fine - it's what we wanted
+		if err.Error() == "os: process already finished" {
+			log.InfoLog.Printf("daemon process (PID: %d) was already finished", pid)
+		} else {
+			return fmt.Errorf("failed to stop daemon process: %w", err)
+		}
 	}
 
 	// Clean up PID file
