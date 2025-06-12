@@ -1,5 +1,59 @@
-.idea
+# IDE files
+.idea/
+.vscode/
+
+# Aider AI files
 .aider*
-claude-squad
+
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go build artifacts
+bin/
+dist/
+/claude-squad
+/claude-squad-*
+/cs
+/cs-*
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.out
+
+# Go workspace file
+go.work
+
+# OS files
+.DS_Store
 **.DS_Store
-cs
+
+# Temporary files
+*.tmp
+*.log
+
+# Environment files
+.env
+.env.local
+
+# Node.js dependencies (for web frontend)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Next.js build output
+.next/
+out/
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock

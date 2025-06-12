@@ -13,12 +13,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
 
 var (
-	version     = "1.0.5"
+	// Build-time variables (set via ldflags)
+	version   = "dev"      // Version string
+	commit    = "unknown"  // Git commit hash
+	buildTime = "unknown"  // Build timestamp
+	
+	// CLI flags
 	programFlag string
 	autoYesFlag bool
 	daemonFlag  bool
@@ -136,7 +142,16 @@ var (
 		Short: "Print the version number of claude-squad",
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Printf("claude-squad version %s\n", version)
-			fmt.Printf("https://github.com/smtg-ai/claude-squad/releases/tag/v%s\n", version)
+			fmt.Printf("commit: %s\n", commit)
+			fmt.Printf("built: %s\n", buildTime)
+			if version != "dev" {
+				// Remove leading 'v' if present to avoid double 'v' in URL
+				cleanVersion := version
+				if strings.HasPrefix(version, "v") {
+					cleanVersion = version[1:]
+				}
+				fmt.Printf("https://github.com/smtg-ai/claude-squad/releases/tag/v%s\n", cleanVersion)
+			}
 		},
 	}
 )

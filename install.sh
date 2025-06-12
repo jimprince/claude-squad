@@ -1,320 +1,250 @@
-#!/usr/bin/env bash
+#!/bin/bash
+
+# claude-squad installation script
+# This script downloads and installs the latest claude-squad binary
 
 set -e
 
-setup_shell_and_path() {
-    BIN_DIR=${BIN_DIR:-$HOME/.local/bin}
+# Configuration
+GITHUB_REPO="smtg-ai/claude-squad"
+BINARY_NAME="cs"
+INSTALL_DIR="${HOME}/bin"
+LATEST_VERSION=""  # Will be updated by GitHub Actions
 
-    case $SHELL in
-        */zsh)
-            PROFILE=$HOME/.zshrc
-            ;;
-        */bash)
-            PROFILE=$HOME/.bashrc
-            ;;
-        */fish)
-            PROFILE=$HOME/.config/fish/config.fish
-            ;;
-        */ash)
-            PROFILE=$HOME/.profile
-            ;;
-        *)
-            echo "could not detect shell, manually add ${BIN_DIR} to your PATH."
-            exit 1
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Helper functions
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+log_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Detect OS and architecture
+detect_platform() {
+    local os arch
+    
+    # Detect OS
+    case "$(uname -s)" in
+        Linux*)     os="linux" ;;
+        Darwin*)    os="darwin" ;;
+        CYGWIN*|MINGW*|MSYS*) os="windows" ;;
+        *)          log_error "Unsupported operating system: $(uname -s)" && exit 1 ;;
     esac
-
-    if [[ ":$PATH:" != *":${BIN_DIR}:"* ]]; then
-        echo >> "$PROFILE" && echo "export PATH=\"\$PATH:$BIN_DIR\"" >> "$PROFILE"
-    fi
+    
+    # Detect architecture
+    case "$(uname -m)" in
+        x86_64|amd64)   arch="amd64" ;;
+        arm64|aarch64)  arch="arm64" ;;
+        *)              log_error "Unsupported architecture: $(uname -m)" && exit 1 ;;
+    esac
+    
+    echo "${os}-${arch}"
 }
 
-detect_platform_and_arch() {
-    PLATFORM="$(uname | tr '[:upper:]' '[:lower:]')"
-    if [[ "$PLATFORM" == mingw*_nt* ]]; then
-        PLATFORM="windows"
-    fi
-
-    ARCHITECTURE="$(uname -m)"
-    if [ "${ARCHITECTURE}" = "x86_64" ]; then
-        # Redirect stderr to /dev/null to avoid printing errors if non Rosetta.
-        if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = "1" ]; then
-            ARCHITECTURE="arm64" # Rosetta.
-        else
-            ARCHITECTURE="amd64" # Intel.
-        fi
-    elif [ "${ARCHITECTURE}" = "arm64" ] || [ "${ARCHITECTURE}" = "aarch64" ]; then
-        ARCHITECTURE="arm64" # Arm.
-    else
-        ARCHITECTURE="amd64" # Amd.
-    fi
-
-    if [[ "$PLATFORM" == "windows" ]]; then
-        ARCHIVE_EXT=".zip"
-        EXTENSION=".exe"
-    else
-        ARCHIVE_EXT=".tar.gz"
-        EXTENSION=""
-    fi
-}
-
+# Get latest version from GitHub API
 get_latest_version() {
-    # Get latest version from GitHub API, including prereleases
-    API_RESPONSE=$(curl -sS "https://api.github.com/repos/smtg-ai/claude-squad/releases")
-    if [ $? -ne 0 ]; then
-        echo "Failed to connect to GitHub API"
+    if [ -n "$LATEST_VERSION" ]; then
+        echo "$LATEST_VERSION"
+        return
+    fi
+    
+    log_info "Fetching latest version from GitHub..."
+    local latest_version
+    if command -v curl >/dev/null 2>&1; then
+        latest_version=$(curl -s "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    elif command -v wget >/dev/null 2>&1; then
+        latest_version=$(wget -qO- "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    else
+        log_error "Neither curl nor wget is available. Please install one of them."
         exit 1
     fi
     
-    if echo "$API_RESPONSE" | grep -q "Not Found"; then
-        echo "No releases found in the repository"
+    if [ -z "$latest_version" ]; then
+        log_error "Failed to fetch latest version"
         exit 1
     fi
     
-    # Get the first release (latest) from the array
-    LATEST_VERSION=$(echo "$API_RESPONSE" | grep -m1 '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | sed 's/^v//')
-    if [ -z "$LATEST_VERSION" ]; then
-        echo "Failed to parse version from GitHub API response:"
-        echo "$API_RESPONSE" | grep -v "upload_url" # Filter out long upload_url line
-        exit 1
-    fi
-    echo "$LATEST_VERSION"
+    echo "$latest_version"
 }
 
-download_release() {
-    local version=$1
-    local binary_url=$2
-    local archive_name=$3
-    local tmp_dir=$4
-
-    echo "Downloading binary from $binary_url"
-    DOWNLOAD_OUTPUT=$(curl -sS -L -f -w '%{http_code}' "$binary_url" -o "${tmp_dir}/${archive_name}" 2>&1)
-    HTTP_CODE=$?
+# Download binary
+download_binary() {
+    local version="$1"
+    local platform="$2"
+    local extension=""
     
-    if [ $HTTP_CODE -ne 0 ]; then
-        echo "Error: Failed to download release asset"
-        echo "This could be because:"
-        echo "1. The release ${version} doesn't have assets uploaded yet"
-        echo "2. The asset for ${PLATFORM}_${ARCHITECTURE} wasn't built"
-        echo "3. The asset name format has changed"
-        echo ""
-        echo "Expected asset name: ${archive_name}"
-        echo "URL attempted: ${binary_url}"
-        if [ "$version" == "latest" ]; then
-            echo ""
-            echo "Tip: Try installing a specific version instead of 'latest'"
-            echo "Available versions:"
-            echo "$API_RESPONSE" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | sed 's/^v//'
-        fi
-        rm -rf "$tmp_dir"
-        exit 1
+    if [[ "$platform" == *"windows"* ]]; then
+        extension=".exe"
     fi
-}
-
-extract_and_install() {
-    local tmp_dir=$1
-    local archive_name=$2
-    local bin_dir=$3
-    local extension=$4
-
-    if [[ "$PLATFORM" == "windows" ]]; then
-        if ! unzip -t "${tmp_dir}/${archive_name}" > /dev/null 2>&1; then
-            echo "Error: Downloaded file is not a valid zip archive"
-            rm -rf "$tmp_dir"
+    
+    local binary_name="${BINARY_NAME}-${platform}${extension}"
+    local download_url="https://github.com/${GITHUB_REPO}/releases/download/${version}/${binary_name}"
+    local temp_file="/tmp/${binary_name}"
+    
+    log_info "Downloading ${binary_name}..."
+    log_info "URL: ${download_url}"
+    
+    if command -v curl >/dev/null 2>&1; then
+        if ! curl -L -o "$temp_file" "$download_url"; then
+            log_error "Failed to download binary"
             exit 1
         fi
-        ensure unzip "${tmp_dir}/${archive_name}" -d "$tmp_dir"
-    else
-        if ! tar tzf "${tmp_dir}/${archive_name}" > /dev/null 2>&1; then
-            echo "Error: Downloaded file is not a valid tar.gz archive"
-            rm -rf "$tmp_dir"
+    elif command -v wget >/dev/null 2>&1; then
+        if ! wget -O "$temp_file" "$download_url"; then
+            log_error "Failed to download binary"
             exit 1
         fi
-        ensure tar xzf "${tmp_dir}/${archive_name}" -C "$tmp_dir"
-    fi
-
-    if [ ! -d "$bin_dir" ]; then
-        mkdir -p "$bin_dir"
-    fi
-
-    # Remove existing binary if upgrading
-    if [ "$UPGRADE_MODE" = true ] && [ -f "$bin_dir/$INSTALL_NAME${extension}" ]; then
-        echo "Removing previous installation from $bin_dir/$INSTALL_NAME${extension}"
-        rm -f "$bin_dir/$INSTALL_NAME${extension}"
-    fi
-
-    # Install binary with desired name
-    mv "${tmp_dir}/claude-squad${extension}" "$bin_dir/$INSTALL_NAME${extension}"
-    rm -rf "$tmp_dir"
-
-    if [ ! -f "$bin_dir/$INSTALL_NAME${extension}" ]; then
-        echo "Installation failed, could not find $bin_dir/$INSTALL_NAME${extension}"
+    else
+        log_error "Neither curl nor wget is available"
         exit 1
     fi
-
-    chmod +x "$bin_dir/$INSTALL_NAME${extension}"
     
-    echo ""
-    if [ "$UPGRADE_MODE" = true ]; then
-        echo "Successfully upgraded '$INSTALL_NAME' to:"
-    else
-        echo "Installed as '$INSTALL_NAME':"
-    fi
-    echo "$("$bin_dir/$INSTALL_NAME${extension}" version)"
+    echo "$temp_file"
 }
 
-check_command_exists() {
-    if command -v "$INSTALL_NAME" &> /dev/null; then
-        EXISTING_PATH=$(which "$INSTALL_NAME")
-        echo "Found existing installation of '$INSTALL_NAME' at $EXISTING_PATH"
-        echo "Will upgrade to the latest version"
-        UPGRADE_MODE=true
+# Install binary
+install_binary() {
+    local temp_file="$1"
+    local install_path="${INSTALL_DIR}/${BINARY_NAME}"
+    
+    # Create install directory if it doesn't exist
+    if [ ! -d "$INSTALL_DIR" ]; then
+        log_info "Creating install directory: $INSTALL_DIR"
+        mkdir -p "$INSTALL_DIR"
+    fi
+    
+    # Make binary executable and move to install directory
+    chmod +x "$temp_file"
+    mv "$temp_file" "$install_path"
+    
+    log_success "Installed $BINARY_NAME to $install_path"
+}
+
+# Check if binary is in PATH
+check_path() {
+    if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
+        log_warning "$INSTALL_DIR is not in your PATH"
+        log_info "Add the following line to your shell profile (~/.bashrc, ~/.zshrc, etc.):"
+        echo "    export PATH=\"\$PATH:$INSTALL_DIR\""
+        log_info "Then reload your shell or run: source ~/.bashrc"
     else
-        UPGRADE_MODE=false
+        log_success "$INSTALL_DIR is in your PATH"
     fi
 }
 
-check_and_install_dependencies() {
-    echo "Checking for required dependencies..."
+# Verify installation
+verify_installation() {
+    local install_path="${INSTALL_DIR}/${BINARY_NAME}"
     
-    # Check for tmux
-    if ! command -v tmux &> /dev/null; then
-        echo "tmux is not installed. Installing tmux..."
+    if [ -x "$install_path" ]; then
+        log_success "Installation verified!"
+        log_info "Run '$BINARY_NAME --help' to get started"
         
-        if [[ "$PLATFORM" == "darwin" ]]; then
-            # macOS
-            if command -v brew &> /dev/null; then
-                ensure brew install tmux
-            else
-                echo "Homebrew is not installed. Please install Homebrew first to install tmux."
-                echo "Visit https://brew.sh for installation instructions."
-                exit 1
-            fi
-        elif [[ "$PLATFORM" == "linux" ]]; then
-            # Linux
-            if command -v apt-get &> /dev/null; then
-                ensure sudo apt-get update
-                ensure sudo apt-get install -y tmux
-            elif command -v dnf &> /dev/null; then
-                ensure sudo dnf install -y tmux
-            elif command -v yum &> /dev/null; then
-                ensure sudo yum install -y tmux
-            elif command -v pacman &> /dev/null; then
-                ensure sudo pacman -S --noconfirm tmux
-            else
-                echo "Could not determine package manager. Please install tmux manually."
-                exit 1
-            fi
-        elif [[ "$PLATFORM" == "windows" ]]; then
-            echo "For Windows, please install tmux via WSL or another method."
-            exit 1
+        # Show version if binary is working
+        if "$install_path" version >/dev/null 2>&1; then
+            log_info "Installed version:"
+            "$install_path" version
         fi
-        
-        echo "tmux installed successfully."
     else
-        echo "tmux is already installed."
+        log_error "Installation verification failed"
+        exit 1
     fi
-    
-    # Check for GitHub CLI (gh)
-    if ! command -v gh &> /dev/null; then
-        echo "GitHub CLI (gh) is not installed. Installing GitHub CLI..."
-        
-        if [[ "$PLATFORM" == "darwin" ]]; then
-            # macOS
-            if command -v brew &> /dev/null; then
-                ensure brew install gh
-            else
-                echo "Homebrew is not installed. Please install Homebrew first to install GitHub CLI."
-                echo "Visit https://brew.sh for installation instructions."
-                exit 1
-            fi
-        elif [[ "$PLATFORM" == "linux" ]]; then
-            # Linux
-            if command -v apt-get &> /dev/null; then
-                echo "Installing GitHub CLI on Debian/Ubuntu..."
-                ensure curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-                ensure sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
-                ensure echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-                ensure sudo apt-get update
-                ensure sudo apt-get install -y gh
-            elif command -v dnf &> /dev/null; then
-                ensure sudo dnf install -y 'dnf-command(config-manager)'
-                ensure sudo dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
-                ensure sudo dnf install -y gh
-            elif command -v yum &> /dev/null; then
-                ensure sudo yum install -y yum-utils
-                ensure sudo yum-config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
-                ensure sudo yum install -y gh
-            elif command -v pacman &> /dev/null; then
-                ensure sudo pacman -S --noconfirm github-cli
-            else
-                echo "Could not determine package manager. Please install GitHub CLI manually."
-                echo "Visit https://github.com/cli/cli#installation for installation instructions."
-                exit 1
-            fi
-        elif [[ "$PLATFORM" == "windows" ]]; then
-            echo "For Windows, please install GitHub CLI manually."
-            echo "Visit https://github.com/cli/cli#installation for installation instructions."
-            exit 1
-        fi
-        
-        echo "GitHub CLI (gh) installed successfully."
-    else
-        echo "GitHub CLI (gh) is already installed."
-    fi
-    
-    echo "All dependencies are installed."
 }
 
+# Cleanup function
+cleanup() {
+    local temp_file="$1"
+    if [ -f "$temp_file" ]; then
+        rm -f "$temp_file"
+    fi
+}
+
+# Main installation function
 main() {
-    # Parse command line arguments
-    INSTALL_NAME="cs"
-    UPGRADE_MODE=false
+    log_info "claude-squad installation script"
+    log_info "Repository: https://github.com/${GITHUB_REPO}"
+    echo
     
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            --name)
-                INSTALL_NAME="$2"
-                shift 2
-                ;;
-            *)
-                echo "Unknown option: $1"
-                echo "Usage: install.sh [--name <n>]"
-                exit 1
-                ;;
-        esac
-    done
-
-    check_command_exists
-    detect_platform_and_arch
-    
-    check_and_install_dependencies
-    
-    setup_shell_and_path
-
-    VERSION=${VERSION:-"latest"}
-    if [[ "$VERSION" == "latest" ]]; then
-        VERSION=$(get_latest_version)
+    # Check for required tools
+    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+        log_error "This script requires either curl or wget to be installed"
+        exit 1
     fi
-
-    RELEASE_URL="https://github.com/smtg-ai/claude-squad/releases/download/v${VERSION}"
-    ARCHIVE_NAME="claude-squad_${VERSION}_${PLATFORM}_${ARCHITECTURE}${ARCHIVE_EXT}"
-    BINARY_URL="${RELEASE_URL}/${ARCHIVE_NAME}"
-    TMP_DIR=$(mktemp -d)
     
-    download_release "$VERSION" "$BINARY_URL" "$ARCHIVE_NAME" "$TMP_DIR"
-    extract_and_install "$TMP_DIR" "$ARCHIVE_NAME" "$BIN_DIR" "$EXTENSION"
+    # Detect platform
+    local platform
+    platform=$(detect_platform)
+    log_info "Detected platform: $platform"
+    
+    # Get latest version
+    local version
+    version=$(get_latest_version)
+    log_info "Latest version: $version"
+    
+    # Download binary
+    local temp_file
+    temp_file=$(download_binary "$version" "$platform")
+    
+    # Install binary
+    install_binary "$temp_file"
+    
+    # Check PATH
+    check_path
+    
+    # Verify installation
+    verify_installation
+    
+    # Cleanup
+    cleanup "$temp_file"
+    
+    echo
+    log_success "claude-squad installation completed!"
+    log_info "You can now run: $BINARY_NAME"
 }
 
-# Run a command that should never fail. If the command fails execution
-# will immediately terminate with an error showing the failing
-# command.
-ensure() {
-    if ! "$@"; then err "command failed: $*"; fi
-}
+# Handle script arguments
+case "${1:-}" in
+    --help|-h)
+        echo "claude-squad installation script"
+        echo
+        echo "Usage: $0 [options]"
+        echo
+        echo "Options:"
+        echo "  --help, -h     Show this help message"
+        echo "  --version, -v  Show version and exit"
+        echo
+        echo "Environment variables:"
+        echo "  INSTALL_DIR    Installation directory (default: \$HOME/bin)"
+        echo
+        echo "Examples:"
+        echo "  # Install to default location"
+        echo "  curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPO}/main/install.sh | sh"
+        echo
+        echo "  # Install to custom directory"
+        echo "  INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPO}/main/install.sh | sh"
+        exit 0
+        ;;
+    --version|-v)
+        echo "claude-squad installation script v1.0.0"
+        exit 0
+        ;;
+esac
 
-err() {
-    echo "$1" >&2
-    exit 1
-}
-
-main "$@" || exit 1
+# Run main function
+main "$@"

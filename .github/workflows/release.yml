@@ -5,28 +5,132 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
-  build:
-    permissions: write-all
-    name: Build Release
+  release:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Check out code into the Go module directory
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
-      - name: Set up Go 1.23
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.23'
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          version: latest
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_REPO_TOKEN: ${{ secrets.BREW_TOKEN }}
+    - name: Get version from tag
+      id: version
+      run: |
+        echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        echo "CLEAN_VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+    - name: Run tests
+      run: go test ./...
+
+    - name: Build binaries
+      run: |
+        mkdir -p dist
+        
+        # Build for multiple platforms
+        platforms=(
+          "linux/amd64"
+          "linux/arm64"
+          "darwin/amd64"
+          "darwin/arm64"
+          "windows/amd64"
+        )
+        
+        for platform in "${platforms[@]}"; do
+          platform_split=(${platform//\// })
+          GOOS=${platform_split[0]}
+          GOARCH=${platform_split[1]}
+          
+          output_name="cs-${GOOS}-${GOARCH}"
+          if [ $GOOS = "windows" ]; then
+            output_name+='.exe'
+          fi
+          
+          echo "Building for $GOOS/$GOARCH..."
+          GOOS=$GOOS GOARCH=$GOARCH go build \
+            -ldflags "-X main.version=${{ steps.version.outputs.VERSION }} -X main.commit=${{ github.sha }} -X main.buildTime=$(date -u '+%Y-%m-%d_%H:%M:%S')" \
+            -o dist/$output_name
+        done
+
+    - name: Generate checksums
+      run: |
+        cd dist
+        sha256sum * > checksums.txt
+
+    - name: Create release notes
+      id: release_notes
+      run: |
+        if [ -f CHANGELOG.md ]; then
+          # Extract notes for this version from CHANGELOG.md if it exists
+          echo "RELEASE_NOTES=See CHANGELOG.md for details." >> $GITHUB_OUTPUT
+        else
+          # Generate simple release notes from recent commits
+          echo "RELEASE_NOTES<<EOF" >> $GITHUB_OUTPUT
+          echo "## Changes" >> $GITHUB_OUTPUT
+          git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 HEAD^)..HEAD >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.version.outputs.VERSION }}
+        name: Release ${{ steps.version.outputs.VERSION }}
+        body: |
+          # claude-squad ${{ steps.version.outputs.VERSION }}
+          
+          ## Installation
+          
+          ### Quick Install (Go users)
+          ```bash
+          go install github.com/smtg-ai/claude-squad@${{ steps.version.outputs.VERSION }}
+          ```
+          
+          ### Download Binary
+          Download the appropriate binary for your platform below.
+          
+          ### Verify Download
+          ```bash
+          sha256sum -c checksums.txt
+          ```
+          
+          ## Changes
+          ${{ steps.release_notes.outputs.RELEASE_NOTES }}
+        files: |
+          dist/*
+        draft: false
+        prerelease: false
+
+  # Job to update installation script after release
+  update-install-script:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Update install script with latest version
+      run: |
+        # Update install.sh with the new version tag
+        sed -i "s/LATEST_VERSION=.*/LATEST_VERSION=\"${{ needs.release.outputs.VERSION }}\"/" install.sh || true
+        
+    - name: Commit updated install script
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add install.sh
+        if git diff --staged --quiet; then
+          echo "No changes to install script"
+        else
+          git commit -m "Update install script to version ${{ needs.release.outputs.VERSION }}"
+          git push
+        fi
