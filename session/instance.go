@@ -1,9 +1,9 @@
 package session
 
 import (
-	"claude-squad/log"
-	"claude-squad/session/git"
-	"claude-squad/session/tmux"
+	"github.com/smtg-ai/claude-squad/log"
+	"github.com/smtg-ai/claude-squad/session/git"
+	"github.com/smtg-ai/claude-squad/session/tmux"
 	"path/filepath"
 
 	"crypto/sha256"

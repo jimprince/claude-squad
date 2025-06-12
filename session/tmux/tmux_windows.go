@@ -3,7 +3,7 @@
 package tmux
 
 import (
-	"claude-squad/log"
+	"github.com/smtg-ai/claude-squad/log"
 	"os"
 	"time"
 

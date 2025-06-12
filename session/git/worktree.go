@@ -1,8 +1,8 @@
 package git
 
 import (
-	"claude-squad/config"
-	"claude-squad/log"
+	"github.com/smtg-ai/claude-squad/config"
+	"github.com/smtg-ai/claude-squad/log"
 	"fmt"
 	"path/filepath"
 	"time"

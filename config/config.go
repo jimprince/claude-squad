@@ -1,7 +1,7 @@
 package config
 
 import (
-	"claude-squad/log"
+	"github.com/smtg-ai/claude-squad/log"
 	"encoding/json"
 	"fmt"
 	"os"

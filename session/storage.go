@@ -1,7 +1,7 @@
 package session
 
 import (
-	"claude-squad/config"
+	"github.com/smtg-ai/claude-squad/config"
 	"encoding/json"
 	"fmt"
 	"time"
