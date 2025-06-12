@@ -13,7 +13,6 @@ import (
 
 const readyIcon = "● "
 const pausedIcon = "⏸ "
-const continuousIcon = "[C]"
 
 var readyStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.AdaptiveColor{Light: "#51bd73", Dark: "#51bd73"})
@@ -143,34 +142,25 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 
 	// Cut the title if it's too long
 	titleText := i.Title
-	
-	// Add continuous mode indicator to title if enabled
-	continuousIndicator := ""
-	continuousIndicatorWidth := 0
-	if i.IsContinuousMode() {
-		timeStr := i.GetContinuousModeTimeRemainingFormatted()
-		if timeStr != "" {
-			continuousIndicator = continuousStyle.Render(fmt.Sprintf("[C:%s]", timeStr))
-			continuousIndicatorWidth = len(fmt.Sprintf("[C:%s]", timeStr)) + 1
-		} else {
-			continuousIndicator = continuousStyle.Render(continuousIcon)
-			continuousIndicatorWidth = len(continuousIcon) + 1 // Account for space
-		}
-	}
-	
-	widthAvail := r.width - 3 - len(prefix) - 1 - continuousIndicatorWidth
+	widthAvail := r.width - 3 - len(prefix) - 1
 	if widthAvail > 0 && widthAvail < len(titleText) && len(titleText) >= widthAvail-3 {
 		titleText = titleText[:widthAvail-3] + "..."
 	}
 	
-	titleWithIndicator := fmt.Sprintf("%s %s", prefix, titleText)
-	if continuousIndicator != "" {
-		titleWithIndicator = fmt.Sprintf("%s %s %s", prefix, titleText, continuousIndicator)
+	// Create core title exactly like upstream
+	coreTitle := fmt.Sprintf("%s %s", prefix, titleText)
+	
+	// Add simple fixed-width continuous mode indicator
+	var renderedTitle string
+	if i.IsContinuousMode() {
+		renderedTitle = fmt.Sprintf("%s %s", coreTitle, continuousStyle.Render("[C]"))
+	} else {
+		renderedTitle = coreTitle
 	}
 	
 	title := titleS.Render(lipgloss.JoinHorizontal(
 		lipgloss.Left,
-		lipgloss.Place(r.width-3, 1, lipgloss.Left, lipgloss.Center, titleWithIndicator),
+		lipgloss.Place(r.width-3, 1, lipgloss.Left, lipgloss.Center, renderedTitle),
 		" ",
 		join,
 	))
