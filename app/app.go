@@ -772,6 +772,23 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 			m.state = stateDefault
 		})
 		return m, nil
+	case keys.KeyRestart:
+		selected := m.list.GetSelectedInstance()
+		if selected == nil {
+			return m, nil
+		}
+		
+		// Create the restart action
+		restartAction := func() tea.Msg {
+			if err := selected.ManualRestart(); err != nil {
+				return err
+			}
+			return fmt.Sprintf("Restarted Claude Code session '%s'", selected.Title)
+		}
+		
+		// Show confirmation modal
+		message := fmt.Sprintf("Restart Claude Code session '%s'?\nThis will restart Claude while preserving your conversation history.", selected.Title)
+		return m, m.confirmAction(message, restartAction)
 	default:
 		return m, nil
 	}
