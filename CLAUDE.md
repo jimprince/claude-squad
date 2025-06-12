@@ -133,6 +133,12 @@ The application requires a TTY for terminal interaction. When running from scrip
 - Error: "could not open a new TTY: open /dev/tty: device not configured"
 - This is expected behavior - the app needs an interactive terminal
 
+## Git Repository Structure
+
+- **origin**: `https://github.com/jimprince/claude-squad.git` (our controlled fork)
+- **upstream**: `https://github.com/smtg-ai/claude-squad.git` (original repo we forked from)
+- **Branch Strategy**: Work on feature branches, merge to origin, then upstream
+
 ## Configuration
 
 - **Config Directory**: `~/.claude-squad/`
